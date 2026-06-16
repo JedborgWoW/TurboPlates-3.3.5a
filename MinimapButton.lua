@@ -16,7 +16,7 @@ overlay:SetPoint("TOPLEFT")
 
 local icon = btn:CreateTexture(nil, "BACKGROUND")
 icon:SetSize(20, 20)
-icon:SetAtlas("renown-rocket")
+icon:SetTexture("Interface\\Icons\\INV_Misc_Rune01")
 icon:SetPoint("CENTER", 0, 1)
 
 local function UpdatePosition()
