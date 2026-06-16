@@ -1,0 +1,832 @@
+--[[----------------------------------------------------------------------------
+    TurboPlates - stock 3.3.5a nameplate engine (name-based data layer)
+    (Backported by Jedborg)
+
+    TurboPlates was written for Ascension's modern nameplate engine, where the
+    client hands the addon a real per-plate UNIT TOKEN, and it calls
+    UnitName(unit)/UnitGUID(unit)/UnitHealth(unit)/UnitIsFriend(unit)/
+    UnitClass(unit)... on that token ~110 times. A stock, unpatched 3.3.5a
+    client has NO nameplate unit tokens, so those calls return nil/false for any
+    plate that isn't your current target.
+
+    This rebuilds the data layer to be NAME/REGION based, the way NotPlater works
+    on real 3.3.5a:
+      * discover plates by polling WorldFrame:GetChildren() + texture fingerprint
+      * read name/level from the plate's font-string regions
+      * read health + REACTION (hostile/neutral/friendly/friendlyPlayer/tapped)
+        from the plate's health-bar StatusBar value + colour
+      * keep name-keyed class/faction caches fed from target/mouseover/group +
+        combat log
+      * match a plate to a real unit (target/focus/mouseover/partyNtarget/
+        raidNtarget) confirmed by name+level+exact-health for things that truly
+        need a token (GUID, auras, casts)
+
+    Instead of editing 110 call sites, we WRAP the Unit* family: each plate gets
+    a stable synthetic token "TurboPlateN"; Unit* calls with that token answer
+    from scraped/cached/matched data, and real tokens pass straight through.
+
+    Must load FIRST in the .toc (before Config.lua). Pure-API shims live in the
+    AscensionCompat_*.lua helpers.
+------------------------------------------------------------------------------]]
+
+local addonName, ns = ...
+
+local HAVE_NATIVE_ENGINE = (type(C_NamePlate) == "table"
+    and type(C_NamePlate.GetNamePlateForUnit) == "function"
+    and type(C_NamePlateManager) == "table")
+
+local WorldFrame   = WorldFrame
+local CreateFrame  = CreateFrame
+local abs          = math.abs
+local wipe         = wipe
+local tonumber     = tonumber
+local pairs, next  = pairs, next
+local bit          = bit
+
+local _UnitExists        = UnitExists
+local _UnitName          = UnitName
+local _UnitGUID          = UnitGUID
+local _UnitClass         = UnitClass
+local _UnitLevel         = UnitLevel
+local _UnitHealth        = UnitHealth
+local _UnitHealthMax     = UnitHealthMax
+local _UnitIsPlayer      = UnitIsPlayer
+local _UnitIsUnit        = UnitIsUnit
+local _UnitIsFriend      = UnitIsFriend
+local _UnitReaction      = UnitReaction
+local _UnitCanAttack     = UnitCanAttack
+local _UnitCreatureType  = UnitCreatureType
+local _UnitIsPet         = UnitIsPet
+local _UnitIsDead        = UnitIsDead
+local _UnitIsDeadOrGhost = UnitIsDeadOrGhost
+local _UnitClassification= UnitClassification
+local _UnitIsTapped      = UnitIsTapped
+local _UnitAffectingCombat = UnitAffectingCombat
+
+local NAMEPLATE_COLORS = {
+    hostile        = {1,   0,   0},
+    neutral        = {1,   1,   0},
+    friendly       = {0,   1,   0},
+    friendlyPlayer = {0,   0.6, 1},
+    tapped         = {0.5, 0.5, 0.5},
+}
+local function ColorToReactionKey(r, g, b)
+    if not r then return nil end
+    for key, c in pairs(NAMEPLATE_COLORS) do
+        if abs(c[1]-r) <= 0.1 and abs(c[2]-g) <= 0.1 and abs(c[3]-b) <= 0.1 then
+            return key
+        end
+    end
+    if abs(r) <= 0.15 and abs(g-0.6) <= 0.25 and abs(b-1) <= 0.15 then
+        return "friendlyPlayer"
+    end
+    return nil
+end
+
+local classCache      = {}
+local classTokenCache = {}
+local isPlayerCache   = {}
+local levelCache      = {}
+ns.npClassCache      = classCache
+ns.npClassTokenCache = classTokenCache
+
+local function CacheUnitByName(unit)
+    if not _UnitExists(unit) then return end
+    local name = _UnitName(unit)
+    if not name then return end
+    local isPlayer = _UnitIsPlayer(unit)
+    isPlayerCache[name] = isPlayer
+    if isPlayer then
+        local localized, token = _UnitClass(unit)
+        if token then
+            classCache[name] = localized
+            classTokenCache[name] = token
+        end
+    end
+    local lvl = _UnitLevel(unit)
+    if lvl and lvl > 0 then levelCache[name] = lvl end
+end
+
+if not HAVE_NATIVE_ENGINE then
+
+    local managedPlates = {}
+    local tokenToPlate  = {}
+    local tokenCounter  = 0
+
+    local NAMEPLATE_TEXTURES = {
+        ["Interface\\TargetingFrame\\UI-TargetingFrame-Flash"] = true,
+        ["Interface\\Tooltips\\Nameplate-Border"]              = true,
+    }
+
+    -- WotLK region order (confirmed against NotPlater):
+    --   1 threatGlow  2 healthBorder  3 castBorder  4 castNoStop
+    --   5 spellIcon   6 highlightTex  7 nameText    8 levelText
+    --   9 bossIcon    10 raidIcon     11 eliteIcon
+    -- children: 1 healthBar  2 castBar
+    --
+    -- IMPORTANT: TurboPlates' HideBlizzardElements REPARENTS the original health
+    -- bar + regions onto a hidden frame. On a stock client a region reparented
+    -- off the WorldFrame nameplate stops receiving engine updates, which would
+    -- freeze anything we scrape from it. So, exactly like NotPlater, we hook the
+    -- original bar/text WHILE they're still live (this runs before TurboPlates
+    -- reparents them) and cache last-known values ON the plate. All readers use
+    -- the cached values, immune to the later reparenting.
+    local function HookPlateSources(blizzFrame, nameText, levelText, healthBar)
+        if blizzFrame._tpSourcesHooked then return end
+        blizzFrame._tpSourcesHooked = true
+
+        if nameText then
+            blizzFrame._tpName = nameText:GetText()
+            hooksecurefunc(nameText, "SetText", function(_, txt)
+                blizzFrame._tpName = txt
+            end)
+        end
+        if levelText then
+            blizzFrame._tpLevel = tonumber(levelText:GetText())
+            hooksecurefunc(levelText, "SetText", function(_, txt)
+                blizzFrame._tpLevel = tonumber(txt)
+            end)
+        end
+        if healthBar and healthBar.GetValue then
+            local cur = healthBar:GetValue()
+            local _, max = healthBar:GetMinMaxValues()
+            blizzFrame._tpHP, blizzFrame._tpHPMax = cur, max
+            local r, g, b = healthBar:GetStatusBarColor()
+            blizzFrame._tpReaction = ColorToReactionKey(r, g, b)
+
+            -- The engine updates the nameplate health bar C-side, which fires the
+            -- OnValueChanged *script* (not the Lua SetValue method). Hook the
+            -- script so our cache tracks live values even after TurboPlates
+            -- reparents the bar. We chain any pre-existing handler.
+            local prevOVC = healthBar:GetScript("OnValueChanged")
+            healthBar:SetScript("OnValueChanged", function(bar, value, ...)
+                local _, mx = bar:GetMinMaxValues()
+                blizzFrame._tpHP = value
+                blizzFrame._tpHPMax = mx
+                local rr, gg, bb = bar:GetStatusBarColor()
+                blizzFrame._tpReaction = ColorToReactionKey(rr, gg, bb)
+                if prevOVC then return prevOVC(bar, value, ...) end
+            end)
+            -- Colour can also change without a value change (e.g. tapping); catch
+            -- it via a method hook as a cheap supplement.
+            hooksecurefunc(healthBar, "SetStatusBarColor", function(bar, rr, gg, bb)
+                blizzFrame._tpReaction = ColorToReactionKey(rr, gg, bb)
+            end)
+        end
+    end
+
+    local function CapturePlateRefs(blizzFrame)
+        local regions = { blizzFrame:GetRegions() }
+        local healthBar, castBar = blizzFrame:GetChildren()
+        local nameText  = regions[7]
+        local levelText = regions[8]
+        blizzFrame._tpNameText  = nameText
+        blizzFrame._tpLevelText = levelText
+        blizzFrame._tpRaidIcon  = regions[10]
+        blizzFrame._tpHealthBar = healthBar
+        blizzFrame._tpCastBar   = castBar
+        HookPlateSources(blizzFrame, nameText, levelText, healthBar)
+    end
+
+    -- Readers prefer the cached (hook-fed) values; fall back to a live read in
+    -- case the hook hasn't fired yet (first frame).
+    local function PlateName(blizzFrame)
+        if blizzFrame._tpName ~= nil then return blizzFrame._tpName end
+        local t = blizzFrame._tpNameText
+        return t and t:GetText() or nil
+    end
+    local function PlateLevel(blizzFrame)
+        if blizzFrame._tpLevel ~= nil then return blizzFrame._tpLevel end
+        local t = blizzFrame._tpLevelText
+        local s = t and t:GetText()
+        return s and tonumber(s) or nil
+    end
+    local function PlateHealth(blizzFrame)
+        if blizzFrame._tpHP ~= nil then
+            return blizzFrame._tpHP, blizzFrame._tpHPMax
+        end
+        local hb = blizzFrame._tpHealthBar
+        if not hb or not hb.GetValue then return nil, nil end
+        local cur = hb:GetValue()
+        local _, max = hb:GetMinMaxValues()
+        return cur, max
+    end
+    local function PlateReaction(blizzFrame)
+        if blizzFrame._tpReaction ~= nil then return blizzFrame._tpReaction end
+        local hb = blizzFrame._tpHealthBar
+        if not hb or not hb.GetStatusBarColor then return nil end
+        return ColorToReactionKey(hb:GetStatusBarColor())
+    end
+
+    local trackedUnits = {}
+    local function RebuildTrackedUnits()
+        wipe(trackedUnits)
+        trackedUnits[#trackedUnits+1] = "target"
+        trackedUnits[#trackedUnits+1] = "focus"
+        trackedUnits[#trackedUnits+1] = "mouseover"
+        local nRaid = (GetNumRaidMembers and GetNumRaidMembers()) or 0
+        if nRaid > 0 then
+            for i = 1, nRaid do trackedUnits[#trackedUnits+1] = "raid"..i.."target" end
+        else
+            local nParty = (GetNumPartyMembers and GetNumPartyMembers()) or 0
+            for i = 1, nParty do trackedUnits[#trackedUnits+1] = "party"..i.."target" end
+        end
+    end
+    RebuildTrackedUnits()
+
+    local function PlateMatchesUnit(blizzFrame, unit)
+        if not _UnitExists(unit) or _UnitIsDeadOrGhost(unit) then return false end
+        local name = PlateName(blizzFrame)
+        if not name or name ~= _UnitName(unit) then return false end
+        local lvl = PlateLevel(blizzFrame)
+        if lvl then
+            local ulvl = _UnitLevel(unit)
+            if ulvl and ulvl > 0 and lvl ~= ulvl then return false end
+        end
+        local cur, max = PlateHealth(blizzFrame)
+        if cur ~= nil then
+            if cur ~= _UnitHealth(unit) then return false end
+            if not _UnitIsPlayer(unit) and max and cur == max then return false end
+        end
+        return true
+    end
+
+    local matchUnitToPlate = {}
+    local function ReleaseMatch(blizzFrame)
+        local u = blizzFrame._tpMatchedUnit
+        if u and matchUnitToPlate[u] == blizzFrame then matchUnitToPlate[u] = nil end
+        blizzFrame._tpMatchedUnit = nil
+        blizzFrame._tpMatchedGUID = nil
+    end
+    local function SetMatch(blizzFrame, unit)
+        if blizzFrame._tpMatchedUnit == unit then return end
+        ReleaseMatch(blizzFrame)
+        blizzFrame._tpMatchedUnit = unit
+        blizzFrame._tpMatchedGUID = unit and _UnitGUID(unit) or nil
+        if unit then
+            matchUnitToPlate[unit] = blizzFrame
+            CacheUnitByName(unit)
+        end
+    end
+
+    local function UpdateMatches()
+        for frame in pairs(managedPlates) do
+            local u = frame._tpMatchedUnit
+            if u and (not _UnitExists(u) or not PlateMatchesUnit(frame, u)) then
+                ReleaseMatch(frame)
+            end
+        end
+        for i = 1, #trackedUnits do
+            local unit = trackedUnits[i]
+            if _UnitExists(unit) and not matchUnitToPlate[unit] then
+                for frame in pairs(managedPlates) do
+                    if frame:IsShown() and not frame._tpMatchedUnit
+                       and PlateMatchesUnit(frame, unit) then
+                        SetMatch(frame, unit)
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    local function ResolveToken(token)
+        local frame = tokenToPlate[token]
+        if not frame then return nil end
+        return frame, frame._tpMatchedUnit
+    end
+
+    local function isPlateToken(unit)
+        return type(unit) == "string" and tokenToPlate[unit] ~= nil
+    end
+
+    function UnitExists(unit, ...)
+        if isPlateToken(unit) then
+            local f = tokenToPlate[unit]
+            return f and f:IsShown() and true or false
+        end
+        return _UnitExists(unit, ...)
+    end
+
+    function UnitName(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitName(real) end
+            return PlateName(f)
+        end
+        return _UnitName(unit, ...)
+    end
+
+    function UnitGUID(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitGUID(real) end
+            return f and f._tpSyntheticGUID or nil
+        end
+        return _UnitGUID(unit, ...)
+    end
+
+    function UnitClass(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitClass(real) end
+            local name = PlateName(f)
+            if name and classCache[name] then
+                return classCache[name], classTokenCache[name]
+            end
+            return (UNKNOWN or "Unknown"), nil
+        end
+        return _UnitClass(unit, ...)
+    end
+
+    function UnitLevel(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitLevel(real) end
+            return PlateLevel(f) or -1
+        end
+        return _UnitLevel(unit, ...)
+    end
+
+    function UnitHealth(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitHealth(real) end
+            local cur = PlateHealth(f)
+            return cur or 0
+        end
+        return _UnitHealth(unit, ...)
+    end
+
+    function UnitHealthMax(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitHealthMax(real) end
+            local _, max = PlateHealth(f)
+            return max or 0
+        end
+        return _UnitHealthMax(unit, ...)
+    end
+
+    function UnitIsPlayer(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitIsPlayer(real) end
+            local name = PlateName(f)
+            if name and isPlayerCache[name] ~= nil then return isPlayerCache[name] end
+            return PlateReaction(f) == "friendlyPlayer"
+        end
+        return _UnitIsPlayer(unit, ...)
+    end
+
+    function UnitIsUnit(unitA, unitB, ...)
+        local aPlate, bPlate = isPlateToken(unitA), isPlateToken(unitB)
+        if aPlate or bPlate then
+            if aPlate and bPlate then
+                return tokenToPlate[unitA] == tokenToPlate[unitB]
+            end
+            if aPlate then
+                local _, ra = ResolveToken(unitA)
+                if ra then return _UnitIsUnit(ra, unitB) end
+                local plateName = PlateName(tokenToPlate[unitA])
+                if plateName and _UnitExists(unitB) then
+                    return plateName == _UnitName(unitB)
+                end
+                return false
+            end
+            local _, rb = ResolveToken(unitB)
+            if rb then return _UnitIsUnit(unitA, rb) end
+            local plateName = PlateName(tokenToPlate[unitB])
+            if plateName and _UnitExists(unitA) then
+                return plateName == _UnitName(unitA)
+            end
+            return false
+        end
+        return _UnitIsUnit(unitA, unitB, ...)
+    end
+
+    function UnitIsFriend(unitA, unitB, ...)
+        if isPlateToken(unitB) then
+            local f, real = ResolveToken(unitB)
+            if real then return _UnitIsFriend(unitA, real) end
+            local rk = PlateReaction(f)
+            return rk == "friendly" or rk == "friendlyPlayer"
+        end
+        if isPlateToken(unitA) then
+            local f, real = ResolveToken(unitA)
+            if real then return _UnitIsFriend(real, unitB) end
+            local rk = PlateReaction(f)
+            return rk == "friendly" or rk == "friendlyPlayer"
+        end
+        return _UnitIsFriend(unitA, unitB, ...)
+    end
+
+    function UnitReaction(unitA, unitB, ...)
+        local function reactFor(token)
+            local f, real = ResolveToken(token)
+            if real then return _UnitReaction("player", real) end
+            local rk = PlateReaction(f)
+            if rk == "hostile"  then return 2 end
+            if rk == "neutral"  then return 4 end
+            if rk == "friendly" or rk == "friendlyPlayer" then return 6 end
+            if rk == "tapped"   then return 2 end
+            return nil
+        end
+        if isPlateToken(unitB) then return reactFor(unitB) end
+        if isPlateToken(unitA) then return reactFor(unitA) end
+        return _UnitReaction(unitA, unitB, ...)
+    end
+
+    function UnitCanAttack(unitA, unitB, ...)
+        if isPlateToken(unitB) then
+            local f, real = ResolveToken(unitB)
+            if real then return _UnitCanAttack(unitA, real) end
+            local rk = PlateReaction(f)
+            return rk == "hostile" or rk == "neutral" or rk == "tapped"
+        end
+        if isPlateToken(unitA) then
+            local f, real = ResolveToken(unitA)
+            if real then return _UnitCanAttack(real, unitB) end
+            local rk = PlateReaction(f)
+            return rk == "hostile" or rk == "neutral" or rk == "tapped"
+        end
+        return _UnitCanAttack(unitA, unitB, ...)
+    end
+
+    function UnitCreatureType(unit, ...)
+        if isPlateToken(unit) then
+            local _, real = ResolveToken(unit)
+            if real then return _UnitCreatureType(real) end
+            return nil
+        end
+        return _UnitCreatureType(unit, ...)
+    end
+
+    function UnitIsPet(unit, ...)
+        if isPlateToken(unit) then
+            local _, real = ResolveToken(unit)
+            if real then return _UnitIsPet(real) end
+            return false
+        end
+        return _UnitIsPet(unit, ...)
+    end
+
+    function UnitIsDead(unit, ...)
+        if isPlateToken(unit) then
+            local f, real = ResolveToken(unit)
+            if real then return _UnitIsDead(real) end
+            local cur = PlateHealth(f)
+            return cur == 0
+        end
+        return _UnitIsDead(unit, ...)
+    end
+
+    function UnitClassification(unit, ...)
+        if isPlateToken(unit) then
+            local _, real = ResolveToken(unit)
+            if real then return _UnitClassification(real) end
+            return "normal"
+        end
+        return _UnitClassification(unit, ...)
+    end
+
+    if _UnitIsTapped then
+        function UnitIsTapped(unit, ...)
+            if isPlateToken(unit) then
+                local f, real = ResolveToken(unit)
+                if real then return _UnitIsTapped(real) end
+                return PlateReaction(f) == "tapped"
+            end
+            return _UnitIsTapped(unit, ...)
+        end
+    end
+
+    if _UnitAffectingCombat then
+        function UnitAffectingCombat(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitAffectingCombat(real) end
+                return false
+            end
+            return _UnitAffectingCombat(unit, ...)
+        end
+    end
+
+    local _UnitPlayerControlled = UnitPlayerControlled
+    if _UnitPlayerControlled then
+        function UnitPlayerControlled(unit, ...)
+            if isPlateToken(unit) then
+                local f, real = ResolveToken(unit)
+                if real then return _UnitPlayerControlled(real) end
+                -- friendlyPlayer bar colour implies player-controlled
+                return PlateReaction(f) == "friendlyPlayer"
+            end
+            return _UnitPlayerControlled(unit, ...)
+        end
+    end
+
+    local _UnitIsTappedByPlayer = UnitIsTappedByPlayer
+    if _UnitIsTappedByPlayer then
+        function UnitIsTappedByPlayer(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitIsTappedByPlayer(real) end
+                return false
+            end
+            return _UnitIsTappedByPlayer(unit, ...)
+        end
+    end
+
+    -- UnitPower family: real on 3.3.5a and mostly called on "player". Only wrap
+    -- the plate-token case (we have no power data for arbitrary plates -> 0).
+    local _UnitPower    = UnitPower
+    local _UnitPowerMax = UnitPowerMax
+    local _UnitPowerType= UnitPowerType
+    if _UnitPower then
+        function UnitPower(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitPower(real, ...) end
+                return 0
+            end
+            return _UnitPower(unit, ...)
+        end
+    end
+    if _UnitPowerMax then
+        function UnitPowerMax(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitPowerMax(real, ...) end
+                return 0
+            end
+            return _UnitPowerMax(unit, ...)
+        end
+    end
+    if _UnitPowerType then
+        function UnitPowerType(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitPowerType(real, ...) end
+                return 0, "MANA"
+            end
+            return _UnitPowerType(unit, ...)
+        end
+    end
+
+    -- UnitCastingInfo / UnitChannelInfo: cast bars need a real unit. For plate
+    -- tokens, defer to the matched real unit; otherwise return nil (no cast),
+    -- which TurboPlates handles as "not casting".
+    local _UnitCastingInfo = UnitCastingInfo
+    local _UnitChannelInfo = UnitChannelInfo
+    if _UnitCastingInfo then
+        function UnitCastingInfo(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitCastingInfo(real) end
+                return nil
+            end
+            return _UnitCastingInfo(unit, ...)
+        end
+    end
+    if _UnitChannelInfo then
+        function UnitChannelInfo(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitChannelInfo(real) end
+                return nil
+            end
+            return _UnitChannelInfo(unit, ...)
+        end
+    end
+
+    -- Auras: a plate token only has auras when matched to a real unit.
+    local _UnitBuff   = UnitBuff
+    local _UnitDebuff = UnitDebuff
+    local _UnitAura   = UnitAura
+    if _UnitBuff then
+        function UnitBuff(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitBuff(real, ...) end
+                return nil
+            end
+            return _UnitBuff(unit, ...)
+        end
+    end
+    if _UnitDebuff then
+        function UnitDebuff(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitDebuff(real, ...) end
+                return nil
+            end
+            return _UnitDebuff(unit, ...)
+        end
+    end
+    if _UnitAura then
+        function UnitAura(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _UnitAura(real, ...) end
+                return nil
+            end
+            return _UnitAura(unit, ...)
+        end
+    end
+
+    local function FireAdded(token, blizzFrame)
+        if EventRegistry and EventRegistry.TriggerEvent then
+            EventRegistry:TriggerEvent("NamePlateManager.UnitAdded", token, blizzFrame)
+        end
+    end
+    local function FireRemoved(token, blizzFrame)
+        if EventRegistry and EventRegistry.TriggerEvent then
+            EventRegistry:TriggerEvent("NamePlateManager.UnitRemoved", token, blizzFrame)
+        end
+    end
+
+    local function AcquirePlate(blizzFrame)
+        tokenCounter = tokenCounter + 1
+        local token = "TurboPlate" .. tokenCounter
+        local synthGUID = string.format("0xF130%07X%05X", tokenCounter % 0xFFFFFFF, tokenCounter % 0xFFFFF)
+
+        managedPlates[blizzFrame] = true
+        tokenToPlate[token] = blizzFrame
+        blizzFrame._unit            = token
+        blizzFrame._tpToken         = token
+        blizzFrame._tpSyntheticGUID = synthGUID
+
+        CapturePlateRefs(blizzFrame)
+
+        for i = 1, #trackedUnits do
+            local unit = trackedUnits[i]
+            if _UnitExists(unit) and not matchUnitToPlate[unit]
+               and PlateMatchesUnit(blizzFrame, unit) then
+                SetMatch(blizzFrame, unit)
+                break
+            end
+        end
+
+        FireAdded(token, blizzFrame)
+    end
+
+    local function ReleasePlate(blizzFrame)
+        local token = blizzFrame._tpToken
+        ReleaseMatch(blizzFrame)
+        managedPlates[blizzFrame] = nil
+        if token then tokenToPlate[token] = nil end
+        FireRemoved(token, blizzFrame)
+        blizzFrame._unit = nil
+        blizzFrame._tpToken = nil
+    end
+
+    local function IsNamePlate(frame)
+        if managedPlates[frame] then return true end
+        if frame:GetName() then return false end
+        local region = frame:GetRegions()
+        if not region or region:GetObjectType() ~= "Texture" then return false end
+        local tex = region:GetTexture()
+        return tex and NAMEPLATE_TEXTURES[tex] or false
+    end
+
+    local visible = {}
+    local function ScanWorldFrame()
+        wipe(visible)
+        local kids = { WorldFrame:GetChildren() }
+        for i = 1, #kids do
+            local frame = kids[i]
+            if IsNamePlate(frame) then
+                visible[frame] = true
+                if not managedPlates[frame] then
+                    AcquirePlate(frame)
+                end
+            end
+        end
+        for frame in pairs(managedPlates) do
+            if not visible[frame] or not frame:IsShown() then
+                ReleasePlate(frame)
+            end
+        end
+    end
+
+    local lastChildCount = -1
+    local matchElapsed = 0
+    local driver = CreateFrame("Frame")
+    driver:SetScript("OnUpdate", function(_, elapsed)
+        local n = WorldFrame:GetNumChildren()
+        if n ~= lastChildCount then
+            lastChildCount = n
+            ScanWorldFrame()
+        end
+        matchElapsed = matchElapsed + elapsed
+        if matchElapsed >= 0.1 then
+            matchElapsed = 0
+            UpdateMatches()
+        end
+    end)
+
+    driver:RegisterEvent("PLAYER_ENTERING_WORLD")
+    driver:RegisterEvent("PARTY_MEMBERS_CHANGED")
+    driver:RegisterEvent("RAID_ROSTER_UPDATE")
+    driver:RegisterEvent("PLAYER_TARGET_CHANGED")
+    driver:RegisterEvent("PLAYER_FOCUS_CHANGED")
+    driver:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+    driver:RegisterEvent("UNIT_TARGET")
+    driver:SetScript("OnEvent", function(_, event, arg1)
+        if event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE"
+           or event == "PLAYER_ENTERING_WORLD" then
+            RebuildTrackedUnits()
+        elseif event == "UPDATE_MOUSEOVER_UNIT" then
+            CacheUnitByName("mouseover")
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            CacheUnitByName("target")
+        elseif event == "PLAYER_FOCUS_CHANGED" then
+            CacheUnitByName("focus")
+        elseif event == "UNIT_TARGET" and arg1 then
+            CacheUnitByName(arg1 .. "target")
+        end
+        UpdateMatches()
+    end)
+
+    -- 3.3.5a delivers COMBAT_LOG args as the event payload (not via a getter).
+    local COMBATLOG_OBJECT_TYPE_PLAYER = 0x00000400
+    local clog = CreateFrame("Frame")
+    clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    clog:SetScript("OnEvent", function(_, _, _, _, srcGUID, srcName, srcFlags, _, destGUID, destName, destFlags)
+        if srcName and srcFlags then
+            isPlayerCache[srcName] = (bit.band(srcFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+        end
+        if destName and destFlags then
+            isPlayerCache[destName] = (bit.band(destFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+        end
+    end)
+
+    C_NamePlate = {}
+    function C_NamePlate.GetNamePlateForUnit(unit)
+        if not unit then return nil end
+        if isPlateToken(unit) then
+            local f = tokenToPlate[unit]
+            return (f and f:IsShown()) and f or nil
+        end
+        local f = matchUnitToPlate[unit]
+        if f and f:IsShown() and PlateMatchesUnit(f, unit) then return f end
+        if _UnitExists(unit) then
+            for frame in pairs(managedPlates) do
+                if frame:IsShown() and PlateMatchesUnit(frame, unit) then
+                    SetMatch(frame, unit)
+                    return frame
+                end
+            end
+        end
+        return nil
+    end
+    function C_NamePlate.GetNamePlates()
+        local t = {}
+        for frame in pairs(managedPlates) do
+            if frame:IsShown() then t[#t+1] = frame end
+        end
+        return t
+    end
+    _G.C_NamePlate = C_NamePlate
+
+    C_NamePlateManager = {}
+    function C_NamePlateManager.EnumerateActiveNamePlates()
+        local frame = nil
+        return function()
+            repeat frame = next(managedPlates, frame)
+            until frame == nil or frame:IsShown()
+            return frame
+        end
+    end
+    function C_NamePlateManager.GetNamePlateSize()
+        for frame in pairs(managedPlates) do
+            local hb = frame._tpHealthBar
+            if hb and hb.GetWidth then
+                local w, h = hb:GetWidth(), hb:GetHeight()
+                if w and w > 0 then return w, h end
+            end
+        end
+        return 110, 30
+    end
+    function C_NamePlateManager.DisableBlizzPlate(unit)
+        local frame = C_NamePlate.GetNamePlateForUnit(unit)
+        if frame and frame.SetAttribute then
+            frame:SetAttribute("disabled-blizz-plate", true)
+        end
+    end
+    function C_NamePlateManager.ApplyFPSIncrease() end
+    function C_NamePlateManager.SetEnableResizeNamePlates() end
+    _G.C_NamePlateManager = C_NamePlateManager
+
+    function ns.GetResolvedNameplateUnit(blizzFrame)
+        return blizzFrame and blizzFrame._unit or nil
+    end
+    function ns.GetPlateReaction(blizzFrame) return PlateReaction(blizzFrame) end
+end
+
+ns.IS_ASCENSION_COMPAT = not HAVE_NATIVE_ENGINE
+TurboPlatesAscensionCompat = {
+    active = not HAVE_NATIVE_ENGINE,
+    mode   = HAVE_NATIVE_ENGINE and "native" or "namebased-335",
+    note   = "Backported to stock 3.3.5a by Jedborg",
+}
