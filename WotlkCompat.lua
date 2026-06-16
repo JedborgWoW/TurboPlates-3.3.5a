@@ -774,7 +774,9 @@ if not HAVE_NATIVE_ENGINE then
     local COMBATLOG_OBJECT_TYPE_PLAYER = 0x00000400
     local clog = CreateFrame("Frame")
     clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    clog:SetScript("OnEvent", function(_, _, _, _, srcGUID, srcName, srcFlags, _, destGUID, destName, destFlags)
+    -- 3.3.5a CLEU payload (after self,event): timestamp, subevent, srcGUID,
+    -- srcName, srcFlags, dstGUID, dstName, dstFlags (no raid flags on this core).
+    clog:SetScript("OnEvent", function(_, _, _, _, srcGUID, srcName, srcFlags, destGUID, destName, destFlags)
         if srcName and srcFlags then
             isPlayerCache[srcName] = (bit.band(srcFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
         end
