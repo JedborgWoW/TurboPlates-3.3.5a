@@ -19,9 +19,17 @@ local UnitAura = UnitAura   -- exists on 3.3.5a (singular); wrapped? no - aura
 
 ---------------------------------------------------------------------------
 -- AuraUtil.ForEachAura(unit, filter, maxCount, callback)
+--
+-- ClassicAPI ships its own AuraUtil.ForEachAura, but it's built on the retail
+-- UnitAuraSlots API which doesn't exist on stock 3.3.5a - so it errors the
+-- instant TurboPlates iterates auras. Whenever the slot API is missing, REPLACE
+-- ForEachAura/FindAuraByName with these UnitAura-based versions (don't just
+-- skip when AuraUtil.ForEachAura already exists). UnitAura/UnitExists were
+-- already wrapped in WotlkCompat.lua, so plate tokens resolve correctly here.
 ---------------------------------------------------------------------------
-if type(AuraUtil) ~= "table" or type(AuraUtil.ForEachAura) ~= "function" then
-    AuraUtil = AuraUtil or {}
+AuraUtil = AuraUtil or {}
+local NEED_AURA_SHIM = (type(UnitAuraSlots) ~= "function")
+if NEED_AURA_SHIM or type(AuraUtil.ForEachAura) ~= "function" then
     function AuraUtil.ForEachAura(unit, filter, maxCount, callback)
         if not unit or not UnitExists(unit) or type(callback) ~= "function" then return end
         filter = filter or "HELPFUL"
@@ -39,6 +47,8 @@ if type(AuraUtil) ~= "table" or type(AuraUtil.ForEachAura) ~= "function" then
             if stop then break end
         end
     end
+end
+if NEED_AURA_SHIM or type(AuraUtil.FindAuraByName) ~= "function" then
     function AuraUtil.FindAuraByName(name, unit, filter)
         if not unit or not UnitExists(unit) then return nil end
         filter = filter or "HELPFUL"
@@ -49,8 +59,8 @@ if type(AuraUtil) ~= "table" or type(AuraUtil.ForEachAura) ~= "function" then
         end
         return nil
     end
-    _G.AuraUtil = AuraUtil
 end
+_G.AuraUtil = AuraUtil
 
 ---------------------------------------------------------------------------
 -- UnitAuras alias
