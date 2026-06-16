@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # TurboPlates
 
 Lightweight nameplate addon, built from scratch for WoW 3.3.5a (w/ Ascension API).
@@ -56,3 +57,7 @@ Includes the following libraries:
 - LibDeflate
 - AceSerializer-3.0
 - LibSharedMedia-3.0
+=======
+# TurboPlates-3.3.5a
+Ascension TurboPlates backported to 3.3.5a
+>>>>>>> 3d766499502c7d5b7e6e47be6a213cb209415608
