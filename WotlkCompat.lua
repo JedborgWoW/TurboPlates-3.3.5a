@@ -634,6 +634,28 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- Threat: UnitDetailedThreatSituation(unit, mob) exists natively on 3.3.5a,
+    -- but the native C function throws "Usage:" if either arg is one of our
+    -- synthetic plate tokens. Resolve plate tokens to their matched real unit;
+    -- if a token isn't bound to a real unit, return nil (no threat data) rather
+    -- than erroring.
+    local _UnitDetailedThreatSituation = UnitDetailedThreatSituation
+    if _UnitDetailedThreatSituation then
+        function UnitDetailedThreatSituation(unit, mob, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if not real then return nil end
+                unit = real
+            end
+            if isPlateToken(mob) then
+                local _, real = ResolveToken(mob)
+                if not real then return nil end
+                mob = real
+            end
+            return _UnitDetailedThreatSituation(unit, mob, ...)
+        end
+    end
+
     local function FireAdded(token, blizzFrame)
         if EventRegistry and EventRegistry.TriggerEvent then
             EventRegistry:TriggerEvent("NamePlateManager.UnitAdded", token, blizzFrame)
@@ -789,6 +811,39 @@ if not HAVE_NATIVE_ENGINE then
     end
     _G.C_NamePlate = C_NamePlate
 
+    -- Actually hide the stock Blizzard nameplate. On a real Ascension/retail
+    -- client DisableBlizzPlate just flips a secure attribute and the native
+    -- engine hides the plate; stock 3.3.5a ignores that attribute, so we hide
+    -- the regions ourselves - mirroring TurboPlates' own HideBlizzardElements
+    -- (reparent off the WorldFrame plate, alpha 0, hide, clear textures). The
+    -- name/level/health hooks were installed earlier (HookPlateSources) and the
+    -- C engine keeps writing the same region objects by pointer, so scraping
+    -- survives. We set the same `_turboBlizzHidden` flag TurboPlates uses, so
+    -- its combat-time HideBlizzardElements no-ops on an already-hidden plate.
+    local blizzHiddenParent = CreateFrame("Frame")
+    blizzHiddenParent:Hide()
+    local function HideBlizzPlateRegions(blizzFrame)
+        if blizzFrame._turboBlizzHidden then return end
+        local elements = { blizzFrame:GetRegions() }
+        local healthBar, castBar = blizzFrame:GetChildren()
+        if healthBar then elements[#elements + 1] = healthBar end
+        if castBar   then elements[#elements + 1] = castBar end
+        for i = 1, #elements do
+            local child = elements[i]
+            if child then
+                child:SetParent(blizzHiddenParent)
+                child:SetAlpha(0)
+                child:Hide()
+                if child.SetTexture then
+                    child:SetTexture()
+                elseif child.SetStatusBarTexture then
+                    child:SetStatusBarTexture(nil)
+                end
+            end
+        end
+        blizzFrame._turboBlizzHidden = true
+    end
+
     C_NamePlateManager = {}
     function C_NamePlateManager.EnumerateActiveNamePlates()
         local frame = nil
@@ -810,9 +865,11 @@ if not HAVE_NATIVE_ENGINE then
     end
     function C_NamePlateManager.DisableBlizzPlate(unit)
         local frame = C_NamePlate.GetNamePlateForUnit(unit)
-        if frame and frame.SetAttribute then
+        if not frame then return end
+        if frame.SetAttribute then
             frame:SetAttribute("disabled-blizz-plate", true)
         end
+        HideBlizzPlateRegions(frame)
     end
     function C_NamePlateManager.ApplyFPSIncrease() end
     function C_NamePlateManager.SetEnableResizeNamePlates() end

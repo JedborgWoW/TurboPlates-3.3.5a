@@ -177,6 +177,42 @@ do
 end
 
 ---------------------------------------------------------------------------
+-- Texture:SetAtlas safety net. TurboPlates references a number of retail-only
+-- atlases (checkmarks, quest icons, classification skulls) that don't exist on
+-- 3.3.5a / ClassicAPI - ClassicAPI's SetAtlas hard-errors via assert() on an
+-- unknown atlas name. Wrap it so a known atlas still works, a mapped retail
+-- atlas falls back to a real 3.3.5a texture, and anything else clears the
+-- texture instead of erroring. (ClassicAPI loads before us, so its SetAtlas is
+-- already installed by the time this runs.)
+---------------------------------------------------------------------------
+do
+    local probeTex = UIParent:CreateTexture()
+    local texMeta = getmetatable(probeTex).__index
+    local rawSetAtlas = texMeta.SetAtlas
+    local SKULL = "Interface\\TargetingFrame\\UI-TargetingFrame-Skull"
+    local ATLAS_FALLBACK = {
+        ["questlog-icon-checkmark-yellow-2x"] = "Interface\\Buttons\\UI-CheckBox-Check",
+        ["questnormal"]           = "Interface\\GossipFrame\\AvailableQuestIcon",
+        ["dungeonskull"]          = SKULL,
+        ["warfront-alliancehero"] = SKULL,
+        ["warfront-hordehero"]    = SKULL,
+        ["islands-azeriteboss"]   = SKULL,
+    }
+    function texMeta:SetAtlas(atlas, ...)
+        if rawSetAtlas then
+            local ok = pcall(rawSetAtlas, self, atlas, ...)
+            if ok then return end
+        end
+        local fb = atlas and ATLAS_FALLBACK[atlas]
+        if fb then
+            self:SetTexture(fb)
+        else
+            self:SetTexture(nil)
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- C_CVar (Set / Get / GetBool / GetNumber)
 ---------------------------------------------------------------------------
 if type(C_CVar) ~= "table" then
@@ -292,7 +328,9 @@ end
 ---------------------------------------------------------------------------
 if type(C_Hook) ~= "table" or type(C_Hook.RegisterBucket) ~= "function" then
     C_Hook = C_Hook or {}
-    function C_Hook.RegisterBucket(frame, event, interval, callback)
+    -- NOTE: callers use a colon (C_Hook:RegisterBucket(frame, ...)), so this
+    -- must be a method - the implicit self is C_Hook, frame is the 1st real arg.
+    function C_Hook:RegisterBucket(frame, event, interval, callback)
         local pending = {}
         local elapsed = 0
         frame:RegisterEvent(event)
