@@ -785,6 +785,39 @@ if not HAVE_NATIVE_ENGINE then
         end
     end)
 
+    -- Cast bar driver. On stock 3.3.5a, UNIT_SPELLCAST_* events fire with real
+    -- unit tokens (target/focus/party/raid), never with our synthetic plate
+    -- tokens - so TurboPlates' own castbar handler (which only acts on
+    -- "nameplate"-prefixed units) never fires. Bridge it: when a real unit that
+    -- the match tracker has bound to a plate casts, route the event to that
+    -- plate's castbar via TurboPlates' public API, passing the PLATE TOKEN.
+    -- CheckExistingCast/CleanupCastbar look the plate up in ns.unitToPlate (keyed
+    -- by token, populated by Core.lua), and CastStart reads UnitCastingInfo(token)
+    -- which our wrapper resolves back to the real unit. (Cast events only fire
+    -- for units the client tracks - target/focus/party/raid - which covers the
+    -- mob you're actually fighting; arbitrary unbound plates can't show casts.)
+    local castDriver = CreateFrame("Frame")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_START")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_STOP")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_FAILED")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_DELAYED")
+    castDriver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_UPDATE")
+    castDriver:SetScript("OnEvent", function(_, event, unit)
+        if not unit or isPlateToken(unit) then return end
+        local blizzFrame = matchUnitToPlate[unit]
+        local token = blizzFrame and blizzFrame._tpToken
+        if not token then return end
+        if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START"
+           or event == "UNIT_SPELLCAST_DELAYED" or event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
+            if ns.CheckExistingCast then ns:CheckExistingCast(token) end
+        else
+            if ns.CleanupCastbar then ns:CleanupCastbar(token) end
+        end
+    end)
+
     C_NamePlate = {}
     function C_NamePlate.GetNamePlateForUnit(unit)
         if not unit then return nil end
@@ -826,6 +859,17 @@ if not HAVE_NATIVE_ENGINE then
     blizzHiddenParent:Hide()
     local function HideBlizzPlateRegions(blizzFrame)
         if blizzFrame._turboBlizzHidden then return end
+        -- The name/level FontStrings are what we SCRAPE. On this client the
+        -- engine stops pushing SetText updates to a region once it's reparented
+        -- off the WorldFrame nameplate, which would freeze (or blank) the names
+        -- we read for unmatched/recycled plates. So leave those two parented and
+        -- just make them invisible (alpha 0) - the engine keeps updating their
+        -- text in place, our hooks keep the cache live. Everything else (health
+        -- bar, borders, cast bar, icons) is reparented + hidden as before; the
+        -- health bar is scraped via its OnValueChanged hook, which survives the
+        -- reparent because the C engine writes it by pointer.
+        local nameText  = blizzFrame._tpNameText
+        local levelText = blizzFrame._tpLevelText
         local elements = { blizzFrame:GetRegions() }
         local healthBar, castBar = blizzFrame:GetChildren()
         if healthBar then elements[#elements + 1] = healthBar end
@@ -833,13 +877,17 @@ if not HAVE_NATIVE_ENGINE then
         for i = 1, #elements do
             local child = elements[i]
             if child then
-                child:SetParent(blizzHiddenParent)
-                child:SetAlpha(0)
-                child:Hide()
-                if child.SetTexture then
-                    child:SetTexture()
-                elseif child.SetStatusBarTexture then
-                    child:SetStatusBarTexture(nil)
+                if child == nameText or child == levelText then
+                    child:SetAlpha(0)
+                else
+                    child:SetParent(blizzHiddenParent)
+                    child:SetAlpha(0)
+                    child:Hide()
+                    if child.SetTexture then
+                        child:SetTexture()
+                    elseif child.SetStatusBarTexture then
+                        child:SetStatusBarTexture(nil)
+                    end
                 end
             end
         end
