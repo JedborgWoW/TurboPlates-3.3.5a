@@ -236,6 +236,86 @@ if type(EventRegistry) ~= "table" then
 end
 
 ---------------------------------------------------------------------------
+-- GetCVar / SetCVar: swallow "unknown CVar" errors for retail-only CVars
+-- (e.g. nameplateShowPersonal) that don't exist on a stock 3.3.5a client.
+---------------------------------------------------------------------------
+do
+    local _GetCVar, _SetCVar = GetCVar, SetCVar
+    function GetCVar(name)
+        local ok, v = pcall(_GetCVar, name)
+        if ok then return v end
+        return nil
+    end
+    function SetCVar(name, value)
+        local ok, v1, v2 = pcall(_SetCVar, name, value)
+        if ok then return v1, v2 end
+    end
+    _G.GetCVar = GetCVar
+    _G.SetCVar = SetCVar
+
+    if type(GetCVarBool) == "function" then
+        local _GetCVarBool = GetCVarBool
+        function GetCVarBool(name)
+            local ok, v = pcall(_GetCVarBool, name)
+            return ok and v or false
+        end
+        _G.GetCVarBool = GetCVarBool
+    end
+end
+
+---------------------------------------------------------------------------
+-- Region:GetEffectiveScale: on this client only Frames have it, not plain
+-- Regions (FontString/Texture). ClassicAPI's PixelUtil calls it on whatever
+-- region it's given, so add a fallback that climbs to the nearest frame.
+---------------------------------------------------------------------------
+do
+    local function addFallback(probe)
+        if type(probe.GetEffectiveScale) == "function" then return end
+        local meta = getmetatable(probe).__index
+        function meta:GetEffectiveScale()
+            local parent = self:GetParent()
+            if parent and parent.GetEffectiveScale then
+                return parent:GetEffectiveScale()
+            end
+            return 1
+        end
+    end
+    addFallback(UIParent:CreateTexture())
+    addFallback(UIParent:CreateFontString())
+end
+
+---------------------------------------------------------------------------
+-- C_Hook.RegisterBucket(frame, event, interval, callback): batches an event
+-- over `interval` seconds and invokes callback(events), where events is a
+-- list of {arg1, arg2, ...} tables captured per firing. Not a real Blizzard
+-- API; TurboPlates expects it from the Ascension client.
+---------------------------------------------------------------------------
+if type(C_Hook) ~= "table" or type(C_Hook.RegisterBucket) ~= "function" then
+    C_Hook = C_Hook or {}
+    function C_Hook.RegisterBucket(frame, event, interval, callback)
+        local pending = {}
+        local elapsed = 0
+        frame:RegisterEvent(event)
+        frame:HookScript("OnEvent", function(self, ev, ...)
+            if ev == event then
+                pending[#pending + 1] = { ... }
+            end
+        end)
+        frame:HookScript("OnUpdate", function(self, delta)
+            elapsed = elapsed + delta
+            if elapsed >= interval and #pending > 0 then
+                elapsed = 0
+                local fired = pending
+                pending = {}
+                local ok, err = pcall(callback, fired)
+                if not ok and geterrorhandler then geterrorhandler()(err) end
+            end
+        end)
+    end
+    _G.C_Hook = C_Hook
+end
+
+---------------------------------------------------------------------------
 -- GetCreatureIDFromGUID (WotLK GUID -> npc id)
 ---------------------------------------------------------------------------
 if type(GetCreatureIDFromGUID) ~= "function" then
