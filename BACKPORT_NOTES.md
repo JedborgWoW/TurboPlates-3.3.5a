@@ -33,22 +33,22 @@ untouched, so the rest of the UI and other addons are unaffected.
 Three load-first files contain the whole backport (TurboPlates source is
 untouched):
 
-- **`AscensionCompat_API.lua`** — pure API gap-fillers: `RunNextFrame`,
+- **`WotlkCompat_API.lua`** — pure API gap-fillers: `RunNextFrame`,
   `C_Timer`, `CreateColor`/`ColorMixin`, `WrapTextInColorCode`, `PixelUtil`,
   `Texture:SetColorTexture`, `C_CVar`, `EventRegistry`, `GetCreatureIDFromGUID`.
-- **`AscensionCompat.lua`** — the name-based nameplate engine: WorldFrame
+- **`WotlkCompat.lua`** — the name-based nameplate engine: WorldFrame
   polling + texture fingerprint discovery (NotPlater's method), region/bar
   scraping with hooks that survive TurboPlates reparenting the Blizzard bar, a
   match tracker that binds a plate to a real unit (target / focus / mouseover /
   partyNtarget / raidNtarget — confirmed by name + level + exact health), the
   wrapped `Unit*` family, and `C_NamePlate` / `C_NamePlateManager`.
-- **`AscensionCompat_Auras.lua`** — `AuraUtil.ForEachAura` over `UnitAura`, plus
+- **`WotlkCompat_Auras.lua`** — `AuraUtil.ForEachAura` over `UnitAura`, plus
   `UnitAuras`, `UnitRole`, `UnitQuestInfo`, `UnitDetailedThreatSituation`,
   `UnitGetTotalAbsorbs`, `UnitGroupRolesAssigned(Key)`, `Ambiguate`, and the
   retail group APIs (`IsInGroup` / `IsInRaid` / `GetNumGroupMembers`).
 
 All shims define a symbol only if it's missing, so the folder is harmless on a
-patched client / Ascension (the native engine wins; `TurboPlatesAscensionCompat.mode`
+patched client / Ascension (the native engine wins; `TurboPlatesWotlkCompat.mode`
 reports `"native"` vs `"namebased-335"`).
 
 ## How reaction (friend/foe) is determined

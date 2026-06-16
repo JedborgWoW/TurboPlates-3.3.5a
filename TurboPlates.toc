@@ -8,9 +8,9 @@
 # --- stock 3.3.5a compatibility shims (MUST load before everything) ---
 # Order matters: pure-API shims first (EventRegistry/C_Timer/etc.), then the
 # name-based nameplate engine, then the unit/aura API mappings.
-AscensionCompat_API.lua
-AscensionCompat.lua
-AscensionCompat_Auras.lua
+WotlkCompat_API.lua
+WotlkCompat.lua
+WotlkCompat_Auras.lua
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua

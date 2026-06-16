@@ -26,7 +26,7 @@
     from scraped/cached/matched data, and real tokens pass straight through.
 
     Must load FIRST in the .toc (before Config.lua). Pure-API shims live in the
-    AscensionCompat_*.lua helpers.
+    WotlkCompat_*.lua helpers.
 ------------------------------------------------------------------------------]]
 
 local addonName, ns = ...
@@ -824,8 +824,8 @@ if not HAVE_NATIVE_ENGINE then
     function ns.GetPlateReaction(blizzFrame) return PlateReaction(blizzFrame) end
 end
 
-ns.IS_ASCENSION_COMPAT = not HAVE_NATIVE_ENGINE
-TurboPlatesAscensionCompat = {
+ns.IS_WOTLK_COMPAT = not HAVE_NATIVE_ENGINE
+TurboPlatesWotlkCompat = {
     active = not HAVE_NATIVE_ENGINE,
     mode   = HAVE_NATIVE_ENGINE and "native" or "namebased-335",
     note   = "Backported to stock 3.3.5a by Jedborg",

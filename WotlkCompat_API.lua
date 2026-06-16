@@ -7,8 +7,8 @@
     WrapTextInColorCode, PixelUtil, Texture:SetColorTexture, C_CVar,
     EventRegistry, GetCreatureIDFromGUID.
 
-    LOAD ORDER: this file must load FIRST of the three AscensionCompat files,
-    because AscensionCompat.lua (the nameplate engine) uses EventRegistry and
+    LOAD ORDER: this file must load FIRST of the three WotlkCompat files,
+    because WotlkCompat.lua (the nameplate engine) uses EventRegistry and
     C_Timer, and TurboPlates captures these as file-scope locals. Each symbol is
     only defined if missing, so this is a no-op on a patched client / Ascension.
 ------------------------------------------------------------------------------]]
@@ -288,7 +288,7 @@ end
 -- C_Hook.RegisterBucket(frame, event, interval, callback): batches an event
 -- over `interval` seconds and invokes callback(events), where events is a
 -- list of {arg1, arg2, ...} tables captured per firing. Not a real Blizzard
--- API; TurboPlates expects it from the Ascension client.
+-- API; TurboPlates expects it from a patched (Ascension-style) client.
 ---------------------------------------------------------------------------
 if type(C_Hook) ~= "table" or type(C_Hook.RegisterBucket) ~= "function" then
     C_Hook = C_Hook or {}
