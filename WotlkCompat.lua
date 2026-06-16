@@ -656,6 +656,65 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- Hide the stock Blizzard nameplate so only TurboPlates' own art shows. On a
+    -- real Ascension/retail client DisableBlizzPlate just flips a secure
+    -- attribute and the native engine hides the plate; stock 3.3.5a ignores that,
+    -- so we hide the regions ourselves.
+    --
+    -- The name/level FontStrings are what we SCRAPE for unmatched plates, so they
+    -- must keep receiving the engine's SetText. Reparenting a region off the
+    -- WorldFrame plate stops those updates on this client (and alpha-0 alone is
+    -- undone when the engine re-shows the region), so for those two we keep them
+    -- parented and force them hidden via Hide() + a Show hook - the text keeps
+    -- updating in place, our SetText hook keeps the cache live. Everything else
+    -- (health bar, borders, cast bar, icons) is reparented + hidden; the health
+    -- bar is scraped through its OnValueChanged hook, which survives reparenting
+    -- because the C engine writes it by pointer.
+    --
+    -- Runs at AcquirePlate (before TurboPlates ever sees the plate) and sets the
+    -- `_turboBlizzHidden` flag TurboPlates checks, so TP's own HideBlizzardElements
+    -- (which would reparent the names and break scraping, incl. its in-combat
+    -- path) no-ops on every plate.
+    local blizzHiddenParent = CreateFrame("Frame")
+    blizzHiddenParent:Hide()
+    local function SuppressRegion(region)
+        if not region then return end
+        region:Hide()
+        if not region._tpSuppressed then
+            region._tpSuppressed = true
+            hooksecurefunc(region, "Show", function(self)
+                if self._tpSuppressed then self:Hide() end
+            end)
+        end
+    end
+    local function HideBlizzPlateRegions(blizzFrame)
+        if blizzFrame._turboBlizzHidden then return end
+        local nameText  = blizzFrame._tpNameText
+        local levelText = blizzFrame._tpLevelText
+        local elements = { blizzFrame:GetRegions() }
+        local healthBar, castBar = blizzFrame:GetChildren()
+        if healthBar then elements[#elements + 1] = healthBar end
+        if castBar   then elements[#elements + 1] = castBar end
+        for i = 1, #elements do
+            local child = elements[i]
+            if child then
+                if child == nameText or child == levelText then
+                    SuppressRegion(child)
+                else
+                    child:SetParent(blizzHiddenParent)
+                    child:SetAlpha(0)
+                    child:Hide()
+                    if child.SetTexture then
+                        child:SetTexture()
+                    elseif child.SetStatusBarTexture then
+                        child:SetStatusBarTexture(nil)
+                    end
+                end
+            end
+        end
+        blizzFrame._turboBlizzHidden = true
+    end
+
     local function FireAdded(token, blizzFrame)
         if EventRegistry and EventRegistry.TriggerEvent then
             EventRegistry:TriggerEvent("NamePlateManager.UnitAdded", token, blizzFrame)
@@ -679,6 +738,7 @@ if not HAVE_NATIVE_ENGINE then
         blizzFrame._tpSyntheticGUID = synthGUID
 
         CapturePlateRefs(blizzFrame)
+        HideBlizzPlateRegions(blizzFrame)
 
         for i = 1, #trackedUnits do
             local unit = trackedUnits[i]
@@ -845,54 +905,6 @@ if not HAVE_NATIVE_ENGINE then
         return t
     end
     _G.C_NamePlate = C_NamePlate
-
-    -- Actually hide the stock Blizzard nameplate. On a real Ascension/retail
-    -- client DisableBlizzPlate just flips a secure attribute and the native
-    -- engine hides the plate; stock 3.3.5a ignores that attribute, so we hide
-    -- the regions ourselves - mirroring TurboPlates' own HideBlizzardElements
-    -- (reparent off the WorldFrame plate, alpha 0, hide, clear textures). The
-    -- name/level/health hooks were installed earlier (HookPlateSources) and the
-    -- C engine keeps writing the same region objects by pointer, so scraping
-    -- survives. We set the same `_turboBlizzHidden` flag TurboPlates uses, so
-    -- its combat-time HideBlizzardElements no-ops on an already-hidden plate.
-    local blizzHiddenParent = CreateFrame("Frame")
-    blizzHiddenParent:Hide()
-    local function HideBlizzPlateRegions(blizzFrame)
-        if blizzFrame._turboBlizzHidden then return end
-        -- The name/level FontStrings are what we SCRAPE. On this client the
-        -- engine stops pushing SetText updates to a region once it's reparented
-        -- off the WorldFrame nameplate, which would freeze (or blank) the names
-        -- we read for unmatched/recycled plates. So leave those two parented and
-        -- just make them invisible (alpha 0) - the engine keeps updating their
-        -- text in place, our hooks keep the cache live. Everything else (health
-        -- bar, borders, cast bar, icons) is reparented + hidden as before; the
-        -- health bar is scraped via its OnValueChanged hook, which survives the
-        -- reparent because the C engine writes it by pointer.
-        local nameText  = blizzFrame._tpNameText
-        local levelText = blizzFrame._tpLevelText
-        local elements = { blizzFrame:GetRegions() }
-        local healthBar, castBar = blizzFrame:GetChildren()
-        if healthBar then elements[#elements + 1] = healthBar end
-        if castBar   then elements[#elements + 1] = castBar end
-        for i = 1, #elements do
-            local child = elements[i]
-            if child then
-                if child == nameText or child == levelText then
-                    child:SetAlpha(0)
-                else
-                    child:SetParent(blizzHiddenParent)
-                    child:SetAlpha(0)
-                    child:Hide()
-                    if child.SetTexture then
-                        child:SetTexture()
-                    elseif child.SetStatusBarTexture then
-                        child:SetStatusBarTexture(nil)
-                    end
-                end
-            end
-        end
-        blizzFrame._turboBlizzHidden = true
-    end
 
     C_NamePlateManager = {}
     function C_NamePlateManager.EnumerateActiveNamePlates()

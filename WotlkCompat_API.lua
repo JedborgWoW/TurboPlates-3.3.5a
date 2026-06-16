@@ -272,31 +272,18 @@ if type(EventRegistry) ~= "table" then
 end
 
 ---------------------------------------------------------------------------
--- GetCVar / SetCVar: swallow "unknown CVar" errors for retail-only CVars
--- (e.g. nameplateShowPersonal) that don't exist on a stock 3.3.5a client.
+-- Register the retail-only CVars TurboPlates reads/writes directly through the
+-- native GetCVar/SetCVar (only nameplateShowPersonal is missing on stock;
+-- colorblindMode, nameplateShowFriends, nameplateShowEnemies already exist).
+--
+-- IMPORTANT: we register the CVar instead of wrapping global GetCVar/SetCVar.
+-- Replacing those globals with our own Lua closures taints every secure UI path
+-- that reads a CVar - most visibly, pressing Escape to open the game menu then
+-- trips "A macro script has been blocked from an action only available to the
+-- Blizzard UI." RegisterCVar keeps the native (secure) functions in place.
 ---------------------------------------------------------------------------
-do
-    local _GetCVar, _SetCVar = GetCVar, SetCVar
-    function GetCVar(name)
-        local ok, v = pcall(_GetCVar, name)
-        if ok then return v end
-        return nil
-    end
-    function SetCVar(name, value)
-        local ok, v1, v2 = pcall(_SetCVar, name, value)
-        if ok then return v1, v2 end
-    end
-    _G.GetCVar = GetCVar
-    _G.SetCVar = SetCVar
-
-    if type(GetCVarBool) == "function" then
-        local _GetCVarBool = GetCVarBool
-        function GetCVarBool(name)
-            local ok, v = pcall(_GetCVarBool, name)
-            return ok and v or false
-        end
-        _G.GetCVarBool = GetCVarBool
-    end
+if type(RegisterCVar) == "function" then
+    pcall(RegisterCVar, "nameplateShowPersonal", "0")
 end
 
 ---------------------------------------------------------------------------
