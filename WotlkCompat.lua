@@ -386,6 +386,17 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- A plate's scraped name is briefly empty / "Unknown" on the first frame it
+    -- appears (and right after login), before the engine fills it in. We must not
+    -- announce it to TurboPlates yet: it would render with an "Unknown" name and a
+    -- not-yet-sized health bar, and - because the name doesn't match the real unit
+    -- yet - it also fails to bind to target/focus (so no auras, casts or raid
+    -- marker). Wait until the name is real, then announce (see the driver).
+    local function PlateDataReady(blizzFrame)
+        local name = PlateName(blizzFrame)
+        return name ~= nil and name ~= "" and name ~= UNKNOWN and name ~= "Unknown"
+    end
+
     -- Scratch buffers reused across passes so each plate is scraped at most once
     -- per UpdateMatches call (instead of once per unmatched tracked unit).
     local candFrame, candName, candLvl, candCur, candMax = {}, {}, {}, {}, {}
@@ -945,14 +956,25 @@ if not HAVE_NATIVE_ENGINE then
             end
         end
 
-        FireAdded(token, blizzFrame)
+        -- Only announce once the scraped name is ready. If not (first frame /
+        -- login), the driver re-checks each tick and announces when it becomes
+        -- available, so Core never renders a half-initialized "Unknown" plate.
+        if PlateDataReady(blizzFrame) then
+            blizzFrame._tpAnnounced = true
+            FireAdded(token, blizzFrame)
+        else
+            blizzFrame._tpAnnounced = false
+        end
     end
 
     local function ReleasePlate(blizzFrame)
         local token = blizzFrame._tpToken
         ReleaseMatch(blizzFrame)
         managedPlates[blizzFrame] = nil
-        FireRemoved(token, blizzFrame)
+        if blizzFrame._tpAnnounced then
+            FireRemoved(token, blizzFrame)
+            blizzFrame._tpAnnounced = false
+        end
         blizzFrame._unit = nil
         -- Keep _tpToken + tokenToPlate[token] so the SAME token is reused when this
         -- pooled frame is shown again (see AcquirePlate). Visibility is gated by
@@ -1023,6 +1045,17 @@ if not HAVE_NATIVE_ENGINE then
             -- Re-scan on the throttled tick to catch those show/hide transitions.
             ScanWorldFrame()
             UpdateMatches()
+            -- Announce any plate whose name only just became available (deferred in
+            -- AcquirePlate). Done here because FireAdded is defined below the scan
+            -- functions. UpdateMatches ran first, so a now-ready plate is already
+            -- matched to its real unit when Core first renders it.
+            for frame in pairs(managedPlates) do
+                if not frame._tpAnnounced and frame:IsShown()
+                   and PlateDataReady(frame) then
+                    frame._tpAnnounced = true
+                    FireAdded(frame._tpToken, frame)
+                end
+            end
         end
     end)
 
@@ -1102,13 +1135,13 @@ if not HAVE_NATIVE_ENGINE then
         if not unit then return nil end
         if isPlateToken(unit) then
             local f = tokenToPlate[unit]
-            return (f and f:IsShown()) and f or nil
+            return (f and f:IsShown() and f._tpAnnounced) and f or nil
         end
         local f = matchUnitToPlate[unit]
-        if f and f:IsShown() and PlateMatchesUnit(f, unit) then return f end
+        if f and f:IsShown() and f._tpAnnounced and PlateMatchesUnit(f, unit) then return f end
         if _UnitExists(unit) then
             for frame in pairs(managedPlates) do
-                if frame:IsShown() and PlateMatchesUnit(frame, unit) then
+                if frame:IsShown() and frame._tpAnnounced and PlateMatchesUnit(frame, unit) then
                     SetMatch(frame, unit)
                     return frame
                 end
@@ -1119,18 +1152,20 @@ if not HAVE_NATIVE_ENGINE then
     function C_NamePlate.GetNamePlates()
         local t = {}
         for frame in pairs(managedPlates) do
-            if frame:IsShown() then t[#t+1] = frame end
+            if frame:IsShown() and frame._tpAnnounced then t[#t+1] = frame end
         end
         return t
     end
     _G.C_NamePlate = C_NamePlate
 
     C_NamePlateManager = {}
+    -- Only enumerate ANNOUNCED plates (see PlateDataReady) so Core never iterates
+    -- and renders a half-initialized plate before its name/size are ready.
     function C_NamePlateManager.EnumerateActiveNamePlates()
         local frame = nil
         return function()
             repeat frame = next(managedPlates, frame)
-            until frame == nil or frame:IsShown()
+            until frame == nil or (frame:IsShown() and frame._tpAnnounced)
             return frame
         end
     end
