@@ -1,3 +1,4 @@
+All rights to the Original Creator `Nico aka [esurm@github](https://github.com/esurm)`
 
 # TurboPlates
 
