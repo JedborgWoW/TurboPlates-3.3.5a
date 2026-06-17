@@ -4375,8 +4375,47 @@ groupFrame:SetScript("OnEvent", function(self, event, unit)
     end
 end)
 
+-- Refresh ONLY the combo-point pips on the current target plate. Split out of
+-- UpdateTarget so combo-point events can update the pips without tearing down
+-- and rebuilding the target glow/scale.
+local function RefreshTargetComboPoints()
+    local plate = ns.currentTargetPlate
+    if not plate then return end
+
+    -- Personal bar mode takes priority - hide pips on the target plate.
+    if ns.c_cpOnPersonalBar then
+        if plate.cps then
+            for i = 1, #plate.cps do plate.cps[i]:Hide() end
+        end
+    elseif ns.c_showComboPoints and not UnitIsFriend("player", "target") then
+        EnsureComboPoints(plate, false)  -- false = target nameplate mode
+        if plate.cps then
+            local points = GetComboPoints("player", "target")
+            for i = 1, #plate.cps do
+                if i <= points then plate.cps[i]:Show() else plate.cps[i]:Hide() end
+            end
+        end
+    else
+        -- Disabled or friendly target - hide any existing pips.
+        if plate.cps then
+            for i = 1, #plate.cps do plate.cps[i]:Hide() end
+        end
+    end
+end
+
 -- Update target/combo points and apply target scale
 local function UpdateTarget()
+    -- Fast path: the target itself hasn't changed (this fired for a combo-point
+    -- gain, e.g. Sinister Strike, not a real target switch). Rebuilding the glow
+    -- and scale here removed and re-applied the target glow on every combo-point
+    -- ability, which blinked the blue border (and briefly shrank the plate) on
+    -- each cast. Just refresh the combo-point pips and bail.
+    if UnitExists("target") and ns.currentTargetPlate
+       and ns.currentTargetGUID and ns.currentTargetGUID == UnitGUID("target") then
+        RefreshTargetComboPoints()
+        return
+    end
+
     -- Reset scale and glow on previous target
     if ns.currentTargetPlate then
         -- Verify plate still belongs to our tracked target (not recycled)
@@ -4421,36 +4460,8 @@ local function UpdateTarget()
             -- Show target glow on new target
             UpdateTargetGlow(ns.currentTargetPlate, true)
 
-            -- Handle combo points: personal bar mode takes priority
-            if ns.c_cpOnPersonalBar then
-                -- Personal mode active - hide any combo points on target plate
-                if ns.currentTargetPlate.cps then
-                    for i = 1, #ns.currentTargetPlate.cps do
-                        ns.currentTargetPlate.cps[i]:Hide()
-                    end
-                end
-            elseif ns.c_showComboPoints and not UnitIsFriend("player", "target") then
-                -- Target mode: show combo points on target nameplate
-                EnsureComboPoints(ns.currentTargetPlate, false)  -- false = target nameplate mode
-                if ns.currentTargetPlate.cps then
-                    local points = GetComboPoints("player", "target")
-                    local numCPs = #ns.currentTargetPlate.cps
-                    for i = 1, numCPs do
-                        if i <= points then
-                            ns.currentTargetPlate.cps[i]:Show()
-                        else
-                            ns.currentTargetPlate.cps[i]:Hide()
-                        end
-                    end
-                end
-            else
-                -- Combo points disabled or friendly target - hide any existing combo points
-                if ns.currentTargetPlate.cps then
-                    for i = 1, #ns.currentTargetPlate.cps do
-                        ns.currentTargetPlate.cps[i]:Hide()
-                    end
-                end
-            end
+            -- Combo points on the (new) target plate
+            RefreshTargetComboPoints()
         end
     end
 end
