@@ -338,6 +338,25 @@ if not HAVE_NATIVE_ENGINE then
         return true
     end
 
+    -- Lenient "does this match STILL hold?" used only to decide whether to DROP an
+    -- already-established match. The strict PlateMatchesUnit (name+level+EXACT
+    -- health) is needed to ESTABLISH a unique match among same-named candidates,
+    -- but it must NOT gate keeping one: the plate's scraped health (updated C-side
+    -- via the bar's OnValueChanged hook) and the real unit's UnitHealth (the
+    -- UNIT_HEALTH event) update on different signals and are briefly out of sync
+    -- after every hit. Using the strict check to keep the match dropped the
+    -- "target" binding for a tick on every damage event -> UnitGUID(token) fell
+    -- back to the synthetic GUID -> currentTargetGUID stopped matching -> the
+    -- target glow was removed and the plate shrank to non-target scale, then
+    -- snapped back next tick. That one-frame flip is the "blink" on ability use.
+    -- Keep the match while the unit exists and the name still matches; target/
+    -- focus changes explicitly release it so it re-binds via the strict check.
+    local function PlateStillMatchesUnit(blizzFrame, unit)
+        if not _UnitExists(unit) or _UnitIsDeadOrGhost(unit) then return false end
+        local name = PlateName(blizzFrame)
+        return name ~= nil and name == _UnitName(unit)
+    end
+
     local matchUnitToPlate = {}
     local function ReleaseMatch(blizzFrame)
         local u = blizzFrame._tpMatchedUnit
@@ -421,7 +440,7 @@ if not HAVE_NATIVE_ENGINE then
         for frame in pairs(managedPlates) do
             RefreshPlateScrape(frame)
             local u = frame._tpMatchedUnit
-            if u and (not _UnitExists(u) or not PlateMatchesUnit(frame, u)) then
+            if u and not PlateStillMatchesUnit(frame, u) then
                 ReleaseMatch(frame)
             end
         end
@@ -940,14 +959,6 @@ if not HAVE_NATIVE_ENGINE then
             blizzFrame._tpSyntheticGUID =
                 string.format("0xF130%07X%05X", tokenCounter % 0xFFFFFFF, tokenCounter % 0xFFFFF)
             tokenToPlate[token] = blizzFrame
-
-            -- Core.lua reads parent:GetAlpha() every time the mob moves to detect
-            -- LOS occlusion. On 3.3.5a the Blizzard engine uses the SAME alpha
-            -- channel for target-dimming and hit-animation feedback, so any alpha
-            -- dip is misread as occlusion → nameplate:SetAlpha(0) → visible blink.
-            -- Stock 3.3.5a has no nameplate LOS occlusion, so clamp the read to 1
-            -- so Core never sees a false-positive.
-            blizzFrame.GetAlpha = function() return 1 end
         end
 
         managedPlates[blizzFrame] = true
@@ -1088,10 +1099,23 @@ if not HAVE_NATIVE_ENGINE then
            or event == "PLAYER_ENTERING_WORLD" then
             RebuildTrackedUnits()
         elseif event == "UPDATE_MOUSEOVER_UNIT" then
+            -- Same rationale as target/focus: release first so UpdateMatches
+            -- re-binds "mouseover" to the hovered plate by strict health rather
+            -- than letting the lenient keep-check hold a same-named neighbour.
+            local f = matchUnitToPlate["mouseover"]
+            if f then ReleaseMatch(f) end
             CacheUnitByName("mouseover")
         elseif event == "PLAYER_TARGET_CHANGED" then
+            -- Drop the prior "target" binding so UpdateMatches re-establishes it
+            -- against the correct plate via the strict health check. The lenient
+            -- keep-check would otherwise let a same-named neighbouring plate stay
+            -- bound to "target" when switching between two same-name mobs.
+            local f = matchUnitToPlate["target"]
+            if f then ReleaseMatch(f) end
             CacheUnitByName("target")
         elseif event == "PLAYER_FOCUS_CHANGED" then
+            local f = matchUnitToPlate["focus"]
+            if f then ReleaseMatch(f) end
             CacheUnitByName("focus")
         elseif event == "UNIT_TARGET" and arg1 then
             CacheUnitByName(arg1 .. "target")
@@ -1155,7 +1179,10 @@ if not HAVE_NATIVE_ENGINE then
             return (f and f:IsShown() and f._tpAnnounced) and f or nil
         end
         local f = matchUnitToPlate[unit]
-        if f and f:IsShown() and f._tpAnnounced and PlateMatchesUnit(f, unit) then return f end
+        -- Trust an already-established match via the lenient check; the strict
+        -- health compare here would intermittently return nil for the target on
+        -- the post-hit sync gap (see PlateStillMatchesUnit) and flicker the glow.
+        if f and f:IsShown() and f._tpAnnounced and PlateStillMatchesUnit(f, unit) then return f end
         if _UnitExists(unit) then
             for frame in pairs(managedPlates) do
                 if frame:IsShown() and frame._tpAnnounced and PlateMatchesUnit(frame, unit) then
