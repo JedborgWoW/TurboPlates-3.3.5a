@@ -14,10 +14,15 @@ overlay:SetSize(53, 53)
 overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 overlay:SetPoint("TOPLEFT")
 
-local icon = btn:CreateTexture(nil, "BACKGROUND")
-icon:SetSize(20, 20)
+-- Anchor the icon TOPLEFT (like LibDBIcon) so it lands inside the transparent
+-- hole of the 53x53 TrackingBorder ring. Anchoring CENTER put it under the
+-- opaque part of the ring, so only the ring showed with an empty middle. The
+-- texcoord crop trims the icon's built-in dark border so it fills the hole.
+local icon = btn:CreateTexture(nil, "ARTWORK")
+icon:SetSize(19, 19)
 icon:SetTexture("Interface\\Icons\\INV_Misc_Rune01")
-icon:SetPoint("CENTER", 0, 1)
+icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, -6)
+icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
 local function UpdatePosition()
     if not TurboPlatesDB then return end
