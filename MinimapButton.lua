@@ -9,24 +9,35 @@ btn:RegisterForClicks("AnyUp")
 btn:RegisterForDrag("LeftButton")
 btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
--- Border ring. The MiniMap-TrackingBorder texture's transparent hole is NOT at
--- the geometric centre of the 53x53 texture - it sits offset toward the top-left.
--- Anchoring TOPLEFT(0,0) (the canonical LibDBIcon layout) lands that hole over
--- the button centre. Centring the overlay instead pushed the hole down-right and
--- left the OPAQUE ring over the icon, so the button looked empty/hollow.
+-- Solid dark backing so the centre is never see-through to the map. The icon
+-- texture failing to load (see below) would otherwise leave a hollow ring; this
+-- circle guarantees a clean filled centre regardless.
+local bg = btn:CreateTexture(nil, "BACKGROUND")
+bg:SetSize(20, 20)
+bg:SetTexture("Interface\\AddOns\\TurboPlates\\Textures\\Circle_White.tga")
+bg:SetVertexColor(0.07, 0.07, 0.07, 1)
+bg:SetPoint("CENTER", btn, "CENTER", 0, 1)
+
+-- Icon shows through the ring's hole. The path MUST be the real file name
+-- "INV_Misc_Rune_01" (with the underscore before the number). The previous
+-- "INV_Misc_Rune01" did not exist on the client, so the texture loaded as fully
+-- transparent and the button looked hollow from the start - the earlier anchor
+-- tweaks never mattered because there was no image to show.
+local icon = btn:CreateTexture(nil, "ARTWORK")
+icon:SetSize(18, 18)
+icon:SetTexture("Interface\\Icons\\INV_Misc_Rune_01")
+icon:SetPoint("CENTER", btn, "CENTER", 0, 1)
+icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+-- Ornate border ring on top. The MiniMap-TrackingBorder texture's transparent
+-- hole is NOT at the geometric centre of the 53x53 texture - it sits offset
+-- toward the top-left. Anchoring TOPLEFT(0,0) (the canonical LibDBIcon layout)
+-- lands that hole over the button centre; centring it pushed the hole down-right
+-- and left the OPAQUE ring over the icon.
 local overlay = btn:CreateTexture(nil, "OVERLAY")
 overlay:SetSize(53, 53)
 overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 overlay:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
-
--- Icon sits in the ARTWORK layer (below the OVERLAY border) and shows through the
--- ring's hole, centred in the 31x31 button (the clickable area) with a 1px upward
--- nudge to line up with where the border hole actually is.
-local icon = btn:CreateTexture(nil, "ARTWORK")
-icon:SetSize(19, 19)
-icon:SetTexture("Interface\\Icons\\INV_Misc_Rune01")
-icon:SetPoint("CENTER", btn, "CENTER", 0, 1)
-icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
 local function UpdatePosition()
     if not TurboPlatesDB then return end
