@@ -1792,6 +1792,11 @@ SlashCmdList["TURBOPLATES"] = function(msg)
             end
             return
         end
+
+        if cmd == "dumpplate" or cmd == "dump" then
+            if ns.DebugDumpPlate then ns.DebugDumpPlate() end
+            return
+        end
     end
 
     if ns.ToggleGUI then ns:ToggleGUI() end

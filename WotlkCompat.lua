@@ -801,8 +801,6 @@ if not HAVE_NATIVE_ENGINE then
     end
     local function HideBlizzPlateRegions(blizzFrame)
         if blizzFrame._turboBlizzHidden then return end
-        local nameText  = blizzFrame._tpNameText
-        local levelText = blizzFrame._tpLevelText
         local elements = { blizzFrame:GetRegions() }
         local healthBar, castBar = blizzFrame:GetChildren()
         if healthBar then elements[#elements + 1] = healthBar end
@@ -810,7 +808,17 @@ if not HAVE_NATIVE_ENGINE then
         for i = 1, #elements do
             local child = elements[i]
             if child then
-                if child == nameText or child == levelText then
+                local isFontString = child.GetObjectType
+                    and child:GetObjectType() == "FontString"
+                if isFontString then
+                    -- ALL FontStrings (name, level, and any extra text region)
+                    -- get the Hide()+Show-hook treatment, not just name/level.
+                    -- Reparenting a FontString off the plate is undone by the C
+                    -- engine on this client - it re-shows the region in place - so
+                    -- a reparented level text reappears as a stray floating number
+                    -- ("14") next to our own plate. Suppressing keeps them parented
+                    -- (so the name/level SetText hooks we scrape from keep firing)
+                    -- and reliably hidden.
                     SuppressRegion(child)
                 else
                     child:SetParent(blizzHiddenParent)
@@ -1064,6 +1072,41 @@ if not HAVE_NATIVE_ENGINE then
         return blizzFrame and blizzFrame._unit or nil
     end
     function ns.GetPlateReaction(blizzFrame) return PlateReaction(blizzFrame) end
+
+    -- Diagnostic: dump the raw region/child layout of the current target's plate.
+    -- Reveals this core's actual region order/types so we can confirm name/level
+    -- detection. Invoked via "/tp dumpplate".
+    function ns.DebugDumpPlate()
+        local frame = matchUnitToPlate["target"]
+        if not frame then
+            for f in pairs(managedPlates) do
+                if f:IsShown() then frame = f break end
+            end
+        end
+        if not frame then
+            print("|cff4fa3ffTurboPlates|r: no managed plate found (target a mob first).")
+            return
+        end
+        print("|cff4fa3ffTurboPlates|r plate dump  name="..tostring(PlateName(frame))
+            .." level="..tostring(PlateLevel(frame)))
+        local regions = { frame:GetRegions() }
+        for i = 1, #regions do
+            local r = regions[i]
+            local t = r and r.GetObjectType and r:GetObjectType() or "?"
+            local extra = ""
+            if t == "FontString" then
+                extra = " text='"..tostring(r:GetText()).."' shown="..tostring(r:IsShown())
+            elseif t == "Texture" then
+                extra = " tex='"..tostring(r:GetTexture()).."'"
+            end
+            print("  region["..i.."] "..t..extra)
+        end
+        local i = 0
+        for _, c in ipairs({ frame:GetChildren() }) do
+            i = i + 1
+            print("  child["..i.."] "..(c.GetObjectType and c:GetObjectType() or "?"))
+        end
+    end
 end
 
 ns.IS_WOTLK_COMPAT = not HAVE_NATIVE_ENGINE
