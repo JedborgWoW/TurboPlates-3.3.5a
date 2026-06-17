@@ -131,18 +131,25 @@ local function IsHighlightSpell(spellName)
     return names and names[spellName] or false
 end
 
--- Stop any active glow on castbar's glow frame
+-- Stop any active glow on castbar's glow frame.
+-- Guard on the specific function, not just LCG: depending on load order /
+-- which addon wins LibStub arbitration for "LibCustomGlow-1.0", the resolved
+-- library can be a build that lacks PixelGlow (e.g. once ClassicAPI, which used
+-- to supply a full copy, is removed). Calling the nil field threw
+-- "attempt to call field 'PixelGlow_Stop'". Hide the frame regardless so a glow
+-- started by a previous (working) library is still torn down visually.
 local function StopCastbarGlow(castbar)
-    if not LCG then return end
     local glowFrame = castbar.glowFrame
     if not glowFrame then return end
-    LCG.PixelGlow_Stop(glowFrame, "highlight")
+    if LCG and LCG.PixelGlow_Stop then
+        LCG.PixelGlow_Stop(glowFrame, "highlight")
+    end
     glowFrame:Hide()
 end
 
 -- Start glow on castbar's dedicated glow frame
 local function StartCastbarGlow(castbar)
-    if not LCG then return end
+    if not LCG or not LCG.PixelGlow_Start then return end
     local glowFrame = castbar.glowFrame
     if not glowFrame then return end
     
