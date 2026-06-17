@@ -203,6 +203,16 @@ if not HAVE_NATIVE_ENGINE then
                 blizzFrame._tpHPMax = mx
                 local rr, gg, bb = bar:GetStatusBarColor()
                 blizzFrame._tpReaction = ColorToReactionKey(rr, gg, bb)
+                -- Push a health re-render to TurboPlates. Stock 3.3.5a has no
+                -- UNIT_HEALTH for our synthetic plate tokens, and UNIT_HEALTH for
+                -- real units is keyed wrong in Core (ns.unitToPlate uses the token),
+                -- so without this the plate's HP is stuck at its first-render value.
+                -- The Blizzard bar's OnValueChanged is the live "health changed"
+                -- signal for every plate, matched or not.
+                local token = blizzFrame._tpToken
+                if token and blizzFrame._tpAnnounced and ns.UpdateNameplateHealth then
+                    ns.UpdateNameplateHealth(token)
+                end
                 if prevOVC then return prevOVC(bar, value, ...) end
             end)
             -- Colour can also change without a value change (e.g. tapping); catch

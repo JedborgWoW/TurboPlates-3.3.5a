@@ -3539,6 +3539,11 @@ local function UpdateHealth(unit)
     end
 end
 
+-- Exposed so the WotLK compat layer can push a health re-render when the Blizzard
+-- nameplate health bar changes (stock 3.3.5a has no UNIT_HEALTH for our synthetic
+-- plate tokens, and UNIT_HEALTH for real units doesn't map to ns.unitToPlate).
+ns.UpdateNameplateHealth = UpdateHealth
+
 -- Update health for lite plates (name-only friendly plates with health bar when damaged)
 local function UpdateLiteHealth(unit)
     local nameplate = C_NamePlate_GetNamePlateForUnit(unit)
