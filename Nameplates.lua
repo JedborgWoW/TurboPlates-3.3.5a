@@ -4564,12 +4564,6 @@ local function UpdateLevelText(unit)
 
     local level = UnitLevel(unit)
 
-    -- Skip if unit is same level as player (level > 0 to still show skull units)
-    if level > 0 and level == ns.c_playerLevel then
-        myPlate.levelText:Hide()
-        return
-    end
-
     local levelText = myPlate.levelText
 
     -- Font caching

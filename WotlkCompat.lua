@@ -212,6 +212,11 @@ if not HAVE_NATIVE_ENGINE then
                 local token = blizzFrame._tpToken
                 if token and blizzFrame._tpAnnounced and ns.UpdateNameplateHealth then
                     ns.UpdateNameplateHealth(token)
+                    -- Piggyback a level refresh: the level text is set once at
+                    -- announce time and never re-triggered. If _tpLevel was stale
+                    -- at that point (recycled plate), the first HP change corrects
+                    -- the display without needing a separate event.
+                    if ns.UpdateLevelText then ns.UpdateLevelText(token) end
                 end
                 if prevOVC then return prevOVC(bar, value, ...) end
             end)
