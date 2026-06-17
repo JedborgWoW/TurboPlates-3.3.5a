@@ -3,6 +3,7 @@ All rights to the Original Creator `Nico aka [esurm@github](https://github.com/e
 # TurboPlates
 
 Lightweight nameplate addon, built from scratch for WoW 3.3.5a (w/ Ascension API).
+
 Backported to pure 3.3.5a Core by Jedborg.
 
 ## Features
