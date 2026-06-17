@@ -940,6 +940,14 @@ if not HAVE_NATIVE_ENGINE then
             blizzFrame._tpSyntheticGUID =
                 string.format("0xF130%07X%05X", tokenCounter % 0xFFFFFFF, tokenCounter % 0xFFFFF)
             tokenToPlate[token] = blizzFrame
+
+            -- Core.lua reads parent:GetAlpha() every time the mob moves to detect
+            -- LOS occlusion. On 3.3.5a the Blizzard engine uses the SAME alpha
+            -- channel for target-dimming and hit-animation feedback, so any alpha
+            -- dip is misread as occlusion → nameplate:SetAlpha(0) → visible blink.
+            -- Stock 3.3.5a has no nameplate LOS occlusion, so clamp the read to 1
+            -- so Core never sees a false-positive.
+            blizzFrame.GetAlpha = function() return 1 end
         end
 
         managedPlates[blizzFrame] = true
