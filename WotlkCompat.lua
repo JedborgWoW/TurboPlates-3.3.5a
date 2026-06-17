@@ -62,6 +62,7 @@ local _UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local _UnitClassification= UnitClassification
 local _UnitIsTapped      = UnitIsTapped
 local _UnitAffectingCombat = UnitAffectingCombat
+local _GetRaidTargetIndex = GetRaidTargetIndex
 
 -- Some 3.3.5a cores don't expose every Unit* function natively; an API-shim
 -- addon (e.g. ClassicAPI) provides them and may load AFTER TurboPlates, so a
@@ -92,6 +93,7 @@ local function BindUnitOriginals()
     _UnitClassification= UnitClassification or _UnitClassification or _stubNil
     _UnitIsTapped      = UnitIsTapped      or _UnitIsTapped
     _UnitAffectingCombat = UnitAffectingCombat or _UnitAffectingCombat
+    _GetRaidTargetIndex = GetRaidTargetIndex or _GetRaidTargetIndex or _stubNil
 end
 BindUnitOriginals()
 local _origBinder = CreateFrame("Frame")
@@ -466,7 +468,14 @@ if not HAVE_NATIVE_ENGINE then
     function ns.UnitName(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
-            if real then return _UnitName(real) end
+            if real then
+                -- A matched real unit token (e.g. raidNtarget) can be out of range,
+                -- where UnitName returns the localized UNKNOWN ("Unknown") - which
+                -- then renders on the plate. The scraped plate name is always
+                -- correct, so prefer the real name only when it's actually known.
+                local n = _UnitName(real)
+                if n and n ~= UNKNOWN and n ~= "Unknown" then return n end
+            end
             return PlateName(f)
         end
         return _UnitName(unit, ...)
@@ -816,16 +825,15 @@ if not HAVE_NATIVE_ENGINE then
     -- (every plate showed a "Star" marker). Resolve plate tokens to their matched
     -- real unit; an unbound plate has no real unit so report no marker (nil) - we
     -- can't know an arbitrary plate's mark without a token.
-    local _GetRaidTargetIndex = GetRaidTargetIndex
-    if _GetRaidTargetIndex then
-        function ns.GetRaidTargetIndex(unit, ...)
-            if isPlateToken(unit) then
-                local _, real = ResolveToken(unit)
-                if real then return _GetRaidTargetIndex(real) end
-                return nil
-            end
-            return _GetRaidTargetIndex(unit, ...)
+    -- (defined unconditionally; _GetRaidTargetIndex is captured at file scope and
+    -- re-bound in BindUnitOriginals, since on some cores it's nil at load.)
+    function ns.GetRaidTargetIndex(unit, ...)
+        if isPlateToken(unit) then
+            local _, real = ResolveToken(unit)
+            if real then return _GetRaidTargetIndex(real) end
+            return nil
         end
+        return _GetRaidTargetIndex(unit, ...)
     end
 
     -- Hide the stock Blizzard nameplate so only TurboPlates' own art shows. On a
@@ -907,15 +915,23 @@ if not HAVE_NATIVE_ENGINE then
     end
 
     local function AcquirePlate(blizzFrame)
-        tokenCounter = tokenCounter + 1
-        local token = "TurboPlate" .. tokenCounter
-        local synthGUID = string.format("0xF130%07X%05X", tokenCounter % 0xFFFFFFF, tokenCounter % 0xFFFFF)
+        -- Reuse one stable token per pooled frame. Pooled frames are hidden and
+        -- re-shown constantly, and minting a NEW token on every re-show churned
+        -- Core's per-token state (ns.unitToPlate / currentTargetPlate), which made
+        -- the target scale and other per-plate data flicker. Assign once; keep the
+        -- token + tokenToPlate mapping across hide/show.
+        local token = blizzFrame._tpToken
+        if not token then
+            tokenCounter = tokenCounter + 1
+            token = "TurboPlate" .. tokenCounter
+            blizzFrame._tpToken         = token
+            blizzFrame._tpSyntheticGUID =
+                string.format("0xF130%07X%05X", tokenCounter % 0xFFFFFFF, tokenCounter % 0xFFFFF)
+            tokenToPlate[token] = blizzFrame
+        end
 
         managedPlates[blizzFrame] = true
-        tokenToPlate[token] = blizzFrame
         blizzFrame._unit            = token
-        blizzFrame._tpToken         = token
-        blizzFrame._tpSyntheticGUID = synthGUID
 
         CapturePlateRefs(blizzFrame)
         HideBlizzPlateRegions(blizzFrame)
@@ -936,10 +952,11 @@ if not HAVE_NATIVE_ENGINE then
         local token = blizzFrame._tpToken
         ReleaseMatch(blizzFrame)
         managedPlates[blizzFrame] = nil
-        if token then tokenToPlate[token] = nil end
         FireRemoved(token, blizzFrame)
         blizzFrame._unit = nil
-        blizzFrame._tpToken = nil
+        -- Keep _tpToken + tokenToPlate[token] so the SAME token is reused when this
+        -- pooled frame is shown again (see AcquirePlate). Visibility is gated by
+        -- IsShown() / managedPlates elsewhere, so a kept-but-hidden token is inert.
     end
 
     local function IsNamePlate(frame)
