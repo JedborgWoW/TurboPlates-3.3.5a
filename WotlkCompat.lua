@@ -935,6 +935,14 @@ if not HAVE_NATIVE_ENGINE then
         CapturePlateRefs(blizzFrame)
         HideBlizzPlateRegions(blizzFrame)
 
+        -- Pull fresh data from the live FontStrings/bar NOW, before PlateDataReady.
+        -- By the time our OnUpdate fires, the engine has already written the new
+        -- mob's name/level/health into the regions C-side. Without this call,
+        -- recycled plates (where _tpSourcesHooked skips the HookPlateSources
+        -- re-snapshot) keep _tpName/_tpLevel from the PREVIOUS mob and announce
+        -- with wrong data.
+        RefreshPlateScrape(blizzFrame)
+
         for i = 1, #trackedUnits do
             local unit = trackedUnits[i]
             if _UnitExists(unit) and not matchUnitToPlate[unit]
