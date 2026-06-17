@@ -269,12 +269,52 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- Re-read the live regions/bar for a plate and refresh its cached scrape.
+    -- The snapshot taken at acquire + the SetText/OnValueChanged hooks miss two
+    -- cases: (1) Blizzard RECYCLES plate frames, and the _tpSourcesHooked guard
+    -- skips re-snapshotting, so a reused plate keeps the previous mob's values
+    -- until a hooked setter happens to fire again; (2) the engine sets the
+    -- health-bar COLOUR C-side by pointer (not via the Lua SetStatusBarColor
+    -- method), so the colour hook never fires for a full-health mob that never
+    -- triggers OnValueChanged - leaving reaction stuck on the snapshot (hostile
+    -- read as neutral -> "yellow instead of red"). The name/level FontStrings are
+    -- kept live (not reparented) and the bar value/colour getters read the live
+    -- pointer, so re-reading here is current. Guards only overwrite with valid
+    -- (non-empty / parseable / known-reaction) reads so a frozen read can never
+    -- clobber a good cached value.
+    local function RefreshPlateScrape(frame)
+        local nt = frame._tpNameText
+        if nt then
+            local txt = nt:GetText()
+            if txt and txt ~= "" then frame._tpName = txt end
+        end
+        local lt = frame._tpLevelText
+        if lt then
+            local n = tonumber(lt:GetText())
+            if n then frame._tpLevel = n end
+        end
+        local hb = frame._tpHealthBar
+        if hb and hb.GetValue then
+            local cur = hb:GetValue()
+            if cur ~= nil then
+                local _, mx = hb:GetMinMaxValues()
+                frame._tpHP, frame._tpHPMax = cur, mx
+            end
+            if hb.GetStatusBarColor then
+                local key = ColorToReactionKey(hb:GetStatusBarColor())
+                if key then frame._tpReaction = key end
+            end
+        end
+    end
+
     -- Scratch buffers reused across passes so each plate is scraped at most once
     -- per UpdateMatches call (instead of once per unmatched tracked unit).
     local candFrame, candName, candLvl, candCur, candMax = {}, {}, {}, {}, {}
     local function UpdateMatches()
-        -- Drop matches that no longer hold (few matched plates -> cheap).
+        -- Refresh every managed plate from its live regions, then drop matches
+        -- that no longer hold (few matched plates -> cheap).
         for frame in pairs(managedPlates) do
+            RefreshPlateScrape(frame)
             local u = frame._tpMatchedUnit
             if u and (not _UnitExists(u) or not PlateMatchesUnit(frame, u)) then
                 ReleaseMatch(frame)
