@@ -884,11 +884,22 @@ if not HAVE_NATIVE_ENGINE then
 
     local function IsNamePlate(frame)
         if managedPlates[frame] then return true end
+        -- Once a pooled WorldFrame child has been confirmed as a nameplate it
+        -- stays one for the session (the client recycles the same frames). We must
+        -- remember it: HideBlizzPlateRegions reparents the border TEXTURE off the
+        -- plate, destroying the fingerprint below, so a plate that's been hidden
+        -- once would never be re-identified after the engine re-shows it - it would
+        -- vanish for good when panned off-screen and back.
+        if frame._tpIsNamePlate then return true end
         if frame:GetName() then return false end
         local region = frame:GetRegions()
         if not region or region:GetObjectType() ~= "Texture" then return false end
         local tex = region:GetTexture()
-        return tex and NAMEPLATE_TEXTURES[tex] or false
+        if tex and NAMEPLATE_TEXTURES[tex] then
+            frame._tpIsNamePlate = true
+            return true
+        end
+        return false
     end
 
     local visible = {}
