@@ -63,6 +63,42 @@ local _UnitClassification= UnitClassification
 local _UnitIsTapped      = UnitIsTapped
 local _UnitAffectingCombat = UnitAffectingCombat
 
+-- Some 3.3.5a cores don't expose every Unit* function natively; an API-shim
+-- addon (e.g. ClassicAPI) provides them and may load AFTER TurboPlates, so a
+-- capture taken at this point can be nil. The wrappers call these originals for
+-- real (non-plate) units, so a nil one throws "attempt to call upvalue
+-- '_UnitIsPet' (a nil value)" once a plate resolves to a real unit. Re-bind the
+-- originals from the live globals once everything has loaded (PLAYER_LOGIN, which
+-- fires before any nameplate is queried), and stub anything still missing so the
+-- wrappers degrade gracefully instead of erroring.
+local function _stubNil() return nil end
+local function BindUnitOriginals()
+    _UnitExists        = UnitExists        or _UnitExists        or _stubNil
+    _UnitName          = UnitName          or _UnitName          or _stubNil
+    _UnitGUID          = UnitGUID          or _UnitGUID          or _stubNil
+    _UnitClass         = UnitClass         or _UnitClass         or _stubNil
+    _UnitLevel         = UnitLevel         or _UnitLevel         or _stubNil
+    _UnitHealth        = UnitHealth        or _UnitHealth        or _stubNil
+    _UnitHealthMax     = UnitHealthMax     or _UnitHealthMax     or _stubNil
+    _UnitIsPlayer      = UnitIsPlayer      or _UnitIsPlayer      or _stubNil
+    _UnitIsUnit        = UnitIsUnit        or _UnitIsUnit        or _stubNil
+    _UnitIsFriend      = UnitIsFriend      or _UnitIsFriend      or _stubNil
+    _UnitReaction      = UnitReaction      or _UnitReaction      or _stubNil
+    _UnitCanAttack     = UnitCanAttack     or _UnitCanAttack     or _stubNil
+    _UnitCreatureType  = UnitCreatureType  or _UnitCreatureType  or _stubNil
+    _UnitIsPet         = UnitIsPet         or _UnitIsPet         or _stubNil
+    _UnitIsDead        = UnitIsDead        or _UnitIsDead        or _stubNil
+    _UnitIsDeadOrGhost = UnitIsDeadOrGhost or _UnitIsDeadOrGhost or _stubNil
+    _UnitClassification= UnitClassification or _UnitClassification or _stubNil
+    _UnitIsTapped      = UnitIsTapped      or _UnitIsTapped
+    _UnitAffectingCombat = UnitAffectingCombat or _UnitAffectingCombat
+end
+BindUnitOriginals()
+local _origBinder = CreateFrame("Frame")
+_origBinder:RegisterEvent("PLAYER_LOGIN")
+_origBinder:RegisterEvent("PLAYER_ENTERING_WORLD")
+_origBinder:SetScript("OnEvent", BindUnitOriginals)
+
 local NAMEPLATE_COLORS = {
     hostile        = {1,   0,   0},
     neutral        = {1,   1,   0},
@@ -321,11 +357,18 @@ if not HAVE_NATIVE_ENGINE then
         if nt then
             local txt = nt:GetText()
             if txt and txt ~= "" then frame._tpName = txt end
+            -- Enforce suppression: on a RE-acquired (recycled) plate
+            -- HideBlizzPlateRegions is skipped, and the engine can re-show a
+            -- suppressed FontString C-side (bypassing our Show hook), so the
+            -- Blizzard name/level reappears at its native spot (a second "14"
+            -- behind the name). Re-hide here every tick.
+            if nt._tpSuppressed and nt:IsShown() then nt:Hide() end
         end
         local lt = frame._tpLevelText
         if lt then
             local n = tonumber(lt:GetText())
             if n then frame._tpLevel = n end
+            if lt._tpSuppressed and lt:IsShown() then lt:Hide() end
         end
         local hb = frame._tpHealthBar
         if hb and hb.GetValue then
