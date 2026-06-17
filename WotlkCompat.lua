@@ -176,16 +176,50 @@ if not HAVE_NATIVE_ENGINE then
     end
 
     local function CapturePlateRefs(blizzFrame)
+        -- Capture ONCE per frame, and only the first time - before
+        -- HideBlizzPlateRegions reparents the health/border/cast regions off the
+        -- plate. The region indices (7=name, 8=level, 10=raidIcon) are only valid
+        -- while the original WotLK region order is intact; after reparenting,
+        -- GetRegions returns a reduced/reordered set and these indices grab the
+        -- WRONG FontString. Pooled frames get RE-acquired (hidden then shown
+        -- again), so without this guard a recycled plate would re-capture garbage
+        -- refs -> wrong/blank name, inconsistent plates. The captured refs (and
+        -- their SetText/OnValueChanged hooks) stay valid across reuse, so reusing
+        -- them is correct.
+        if blizzFrame._tpRefsCaptured then return end
         local regions = { blizzFrame:GetRegions() }
         local healthBar, castBar = blizzFrame:GetChildren()
-        local nameText  = regions[7]
-        local levelText = regions[8]
+
+        -- Identify name/level FontStrings by TYPE+ORDER, not by absolute region
+        -- index. The canonical WotLK order is ...nameText(7), levelText(8)..., but
+        -- the number of leading border/glow TEXTURES differs between 3.3.5a cores,
+        -- which shifts those indices and makes us grab the wrong FontString: wrong
+        -- scraped level, and the real level FontString left unsuppressed -> two
+        -- level numbers on the plate. A stock plate has exactly two FontStrings in
+        -- creation order: name first, then level. Pick those, with the canonical
+        -- index as a fallback.
+        local nameText, levelText
+        for i = 1, #regions do
+            local r = regions[i]
+            if r and r.GetObjectType and r:GetObjectType() == "FontString" then
+                if not nameText then
+                    nameText = r
+                elseif not levelText then
+                    levelText = r
+                    break
+                end
+            end
+        end
+        nameText  = nameText  or regions[7]
+        levelText = levelText or regions[8]
+
         blizzFrame._tpNameText  = nameText
         blizzFrame._tpLevelText = levelText
         blizzFrame._tpRaidIcon  = regions[10]
         blizzFrame._tpHealthBar = healthBar
         blizzFrame._tpCastBar   = castBar
         HookPlateSources(blizzFrame, nameText, levelText, healthBar)
+        blizzFrame._tpRefsCaptured = true
     end
 
     -- Readers prefer the cached (hook-fed) values; fall back to a live read in
@@ -873,6 +907,9 @@ if not HAVE_NATIVE_ENGINE then
     local matchElapsed = 0
     local driver = CreateFrame("Frame")
     driver:SetScript("OnUpdate", function(_, elapsed)
+        -- Cheap fast-path: a change in WorldFrame's child count means the client
+        -- grew its nameplate pool (a brand-new plate frame). Scan immediately so
+        -- newly created plates pop in without waiting for the throttled tick.
         local n = WorldFrame:GetNumChildren()
         if n ~= lastChildCount then
             lastChildCount = n
@@ -881,6 +918,14 @@ if not HAVE_NATIVE_ENGINE then
         matchElapsed = matchElapsed + elapsed
         if matchElapsed >= 0.1 * (ns.c_throttleMultiplier or 1) then
             matchElapsed = 0
+            -- On stock 3.3.5a nameplate frames are POOLED: the client hides and
+            -- re-shows persistent WorldFrame children, it doesn't add/remove them.
+            -- Once the pool stops growing the child-count fast-path above never
+            -- fires again, so a plate panned off-screen and back (or a pooled
+            -- frame reused for a new mob) would never be released/re-acquired and
+            -- its art would stay hidden ("plates disappear after looking away").
+            -- Re-scan on the throttled tick to catch those show/hide transitions.
+            ScanWorldFrame()
             UpdateMatches()
         end
     end)
