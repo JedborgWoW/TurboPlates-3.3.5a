@@ -269,25 +269,63 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- Scratch buffers reused across passes so each plate is scraped at most once
+    -- per UpdateMatches call (instead of once per unmatched tracked unit).
+    local candFrame, candName, candLvl, candCur, candMax = {}, {}, {}, {}, {}
     local function UpdateMatches()
+        -- Drop matches that no longer hold (few matched plates -> cheap).
         for frame in pairs(managedPlates) do
             local u = frame._tpMatchedUnit
             if u and (not _UnitExists(u) or not PlateMatchesUnit(frame, u)) then
                 ReleaseMatch(frame)
             end
         end
+        -- Collect unmatched, shown plates and scrape name/level/health ONCE each.
+        local nCand = 0
+        for frame in pairs(managedPlates) do
+            if frame:IsShown() and not frame._tpMatchedUnit then
+                nCand = nCand + 1
+                candFrame[nCand] = frame
+                candName[nCand]  = PlateName(frame)
+                candLvl[nCand]   = PlateLevel(frame)
+                local cur, max = PlateHealth(frame)
+                candCur[nCand]   = cur
+                candMax[nCand]   = max
+            end
+        end
+        -- Match each unmatched tracked unit against the pre-scraped candidates
+        -- using value comparisons only (no further region/bar scraping).
         for i = 1, #trackedUnits do
             local unit = trackedUnits[i]
-            if _UnitExists(unit) and not matchUnitToPlate[unit] then
-                for frame in pairs(managedPlates) do
-                    if frame:IsShown() and not frame._tpMatchedUnit
-                       and PlateMatchesUnit(frame, unit) then
-                        SetMatch(frame, unit)
-                        break
+            if _UnitExists(unit) and not matchUnitToPlate[unit]
+               and not _UnitIsDeadOrGhost(unit) then
+                local uName  = _UnitName(unit)
+                local uLvl   = _UnitLevel(unit)
+                local uHP    = _UnitHealth(unit)
+                local uIsPlr = _UnitIsPlayer(unit)
+                for c = 1, nCand do
+                    local frame = candFrame[c]
+                    if frame and not frame._tpMatchedUnit and candName[c]
+                       and candName[c] == uName then
+                        local lvl = candLvl[c]
+                        if not (lvl and uLvl and uLvl > 0 and lvl ~= uLvl) then
+                            local cur, max = candCur[c], candMax[c]
+                            local hpOk = true
+                            if cur ~= nil then
+                                if cur ~= uHP then hpOk = false
+                                elseif not uIsPlr and max and cur == max then hpOk = false end
+                            end
+                            if hpOk then
+                                SetMatch(frame, unit)
+                                break
+                            end
+                        end
                     end
                 end
             end
         end
+        -- Release frame references so hidden plates can be GC'd.
+        for c = 1, nCand do candFrame[c] = nil end
     end
 
     local function ResolveToken(token)
@@ -801,7 +839,7 @@ if not HAVE_NATIVE_ENGINE then
             ScanWorldFrame()
         end
         matchElapsed = matchElapsed + elapsed
-        if matchElapsed >= 0.1 then
+        if matchElapsed >= 0.1 * (ns.c_throttleMultiplier or 1) then
             matchElapsed = 0
             UpdateMatches()
         end
