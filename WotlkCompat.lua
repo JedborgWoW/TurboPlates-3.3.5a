@@ -811,6 +811,23 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- Raid target marker. GetRaidTargetIndex(unit) is called with our synthetic
+    -- plate token; the native C function doesn't understand it and returns garbage
+    -- (every plate showed a "Star" marker). Resolve plate tokens to their matched
+    -- real unit; an unbound plate has no real unit so report no marker (nil) - we
+    -- can't know an arbitrary plate's mark without a token.
+    local _GetRaidTargetIndex = GetRaidTargetIndex
+    if _GetRaidTargetIndex then
+        function ns.GetRaidTargetIndex(unit, ...)
+            if isPlateToken(unit) then
+                local _, real = ResolveToken(unit)
+                if real then return _GetRaidTargetIndex(real) end
+                return nil
+            end
+            return _GetRaidTargetIndex(unit, ...)
+        end
+    end
+
     -- Hide the stock Blizzard nameplate so only TurboPlates' own art shows. On a
     -- real Ascension/retail client DisableBlizzPlate just flips a secure
     -- attribute and the native engine hides the plate; stock 3.3.5a ignores that,
@@ -1143,6 +1160,15 @@ if not HAVE_NATIVE_ENGINE then
         end
         print("|cff4fa3ffTurboPlates|r plate dump  name="..tostring(PlateName(frame))
             .." level="..tostring(PlateLevel(frame)))
+        print(string.format("  frame scale=%.3f effScale=%.3f size=%.0fx%.0f",
+            frame:GetScale() or 0, frame:GetEffectiveScale() or 0,
+            frame:GetWidth() or 0, frame:GetHeight() or 0))
+        local mp = frame.myPlate
+        if mp then
+            print(string.format("  myPlate scale=%.3f effScale=%.3f size=%.0fx%.0f",
+                mp:GetScale() or 0, mp:GetEffectiveScale() or 0,
+                mp:GetWidth() or 0, mp:GetHeight() or 0))
+        end
         local regions = { frame:GetRegions() }
         for i = 1, #regions do
             local r = regions[i]
