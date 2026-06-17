@@ -9,19 +9,23 @@ btn:RegisterForClicks("AnyUp")
 btn:RegisterForDrag("LeftButton")
 btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
+-- Border ring. The MiniMap-TrackingBorder texture's transparent hole is NOT at
+-- the geometric centre of the 53x53 texture - it sits offset toward the top-left.
+-- Anchoring TOPLEFT(0,0) (the canonical LibDBIcon layout) lands that hole over
+-- the button centre. Centring the overlay instead pushed the hole down-right and
+-- left the OPAQUE ring over the icon, so the button looked empty/hollow.
 local overlay = btn:CreateTexture(nil, "OVERLAY")
 overlay:SetSize(53, 53)
 overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
--- Center the ring on the button so the transparent hole aligns with the button
--- center. TOPLEFT anchoring put the hole at (26,-26) from the button corner,
--- which is 11px away from the icon (centered at (15,-15)), so the opaque ring
--- covered the icon and it looked empty.
-overlay:SetPoint("CENTER", btn, "CENTER")
+overlay:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
 
+-- Icon sits in the ARTWORK layer (below the OVERLAY border) and shows through the
+-- ring's hole, centred in the 31x31 button (the clickable area) with a 1px upward
+-- nudge to line up with where the border hole actually is.
 local icon = btn:CreateTexture(nil, "ARTWORK")
 icon:SetSize(19, 19)
 icon:SetTexture("Interface\\Icons\\INV_Misc_Rune01")
-icon:SetPoint("CENTER", btn, "CENTER")
+icon:SetPoint("CENTER", btn, "CENTER", 0, 1)
 icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
 local function UpdatePosition()
@@ -35,7 +39,12 @@ local function UpdatePosition()
     
     local angle = math.rad(db.pos or 45)
     local x, y = math.cos(angle), math.sin(angle)
-    btn:SetPoint("CENTER", Minimap, "CENTER", x * 80, y * 80)
+    -- Orbit just outside the minimap edge. Deriving the radius from the live
+    -- minimap width keeps the button on the ring for any minimap size (a fixed
+    -- radius leaves it floating off the edge on resized/custom minimaps).
+    local mw = Minimap:GetWidth()
+    local radius = (mw and mw > 0) and (mw * 0.5 + 6) or 80
+    btn:SetPoint("CENTER", Minimap, "CENTER", x * radius, y * radius)
 end
 
 btn:SetMovable(true)
