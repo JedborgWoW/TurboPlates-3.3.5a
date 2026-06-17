@@ -2,25 +2,29 @@ local addonName, ns = ...
 
 -- Event-driven nameplate system - no OnUpdate polling
 
--- Cached globals
-local UnitHealth = UnitHealth
-local UnitHealthMax = UnitHealthMax
+-- Cached globals.
+-- Unit API routed through the WotLK compat wrappers (ns.UnitX) so plate tokens
+-- resolve; NEVER assign these back to the real globals (that taints Blizzard's
+-- secure code). Falls back to the real global on a native engine.
+local UnitHealth = ns.UnitHealth or UnitHealth
+local UnitHealthMax = ns.UnitHealthMax or UnitHealthMax
 local UnitGetTotalAbsorbs = UnitGetTotalAbsorbs
-local UnitExists = UnitExists
-local UnitName = UnitName
-local UnitClass = UnitClass
-local UnitIsPlayer = UnitIsPlayer
-local UnitIsFriend = UnitIsFriend
-local UnitIsUnit = UnitIsUnit
-local UnitReaction = UnitReaction
+local UnitExists = ns.UnitExists or UnitExists
+local UnitName = ns.UnitName or UnitName
+local UnitClass = ns.UnitClass or UnitClass
+local UnitLevel = ns.UnitLevel or UnitLevel
+local UnitIsPlayer = ns.UnitIsPlayer or UnitIsPlayer
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitIsUnit = ns.UnitIsUnit or UnitIsUnit
+local UnitReaction = ns.UnitReaction or UnitReaction
 local UnitThreatSituation = UnitThreatSituation
-local UnitDetailedThreatSituation = UnitDetailedThreatSituation
-local UnitGUID = UnitGUID
-local UnitBuff = UnitBuff
-local UnitDebuff = UnitDebuff
-local UnitIsPet = UnitIsPet
-local UnitPlayerControlled = UnitPlayerControlled
-local UnitCreatureType = UnitCreatureType
+local UnitDetailedThreatSituation = ns.UnitDetailedThreatSituation or UnitDetailedThreatSituation
+local UnitGUID = ns.UnitGUID or UnitGUID
+local UnitBuff = ns.UnitBuff or UnitBuff
+local UnitDebuff = ns.UnitDebuff or UnitDebuff
+local UnitIsPet = ns.UnitIsPet or UnitIsPet
+local UnitPlayerControlled = ns.UnitPlayerControlled or UnitPlayerControlled
+local UnitCreatureType = ns.UnitCreatureType or UnitCreatureType
 local GetComboPoints = GetComboPoints
 local GetRaidTargetIndex = GetRaidTargetIndex
 local SetRaidTargetIconTexture = SetRaidTargetIconTexture
@@ -31,13 +35,13 @@ local IsInRaid = IsInRaid
 local IsInGroup = IsInGroup
 local GetNumGroupMembers = GetNumGroupMembers
 local CreateFrame = CreateFrame
-local UnitIsTapped = UnitIsTapped
-local UnitIsTappedByPlayer = UnitIsTappedByPlayer
-local UnitClassification = UnitClassification
+local UnitIsTapped = ns.UnitIsTapped or UnitIsTapped
+local UnitIsTappedByPlayer = ns.UnitIsTappedByPlayer or UnitIsTappedByPlayer
+local UnitClassification = ns.UnitClassification or UnitClassification
 local UnitGroupRolesAssignedKey = UnitGroupRolesAssignedKey
-local UnitPower = UnitPower
-local UnitPowerType = UnitPowerType
-local UnitPowerMax = UnitPowerMax
+local UnitPower = ns.UnitPower or UnitPower
+local UnitPowerType = ns.UnitPowerType or UnitPowerType
+local UnitPowerMax = ns.UnitPowerMax or UnitPowerMax
 local SetCVar = SetCVar
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
 local pairs = pairs

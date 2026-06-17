@@ -6,9 +6,11 @@ local addonName, ns = ...
 -- Registry persists until zone change, displays only in arena/battleground.
 -- =============================================================================
 
-local UnitGUID = UnitGUID
-local UnitIsFriend = UnitIsFriend
-local UnitIsUnit = UnitIsUnit
+-- Routed through compat wrappers (ns.UnitX) for plate tokens; do NOT reassign the
+-- real globals (would taint Blizzard secure code). Falls back on a native engine.
+local UnitGUID = ns.UnitGUID or UnitGUID
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitIsUnit = ns.UnitIsUnit or UnitIsUnit
 local IsInInstance = IsInInstance
 local GetTime = GetTime
 local wipe = table.wipe

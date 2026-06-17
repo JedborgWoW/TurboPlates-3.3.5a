@@ -378,7 +378,7 @@ if not HAVE_NATIVE_ENGINE then
         return type(unit) == "string" and tokenToPlate[unit] ~= nil
     end
 
-    function UnitExists(unit, ...)
+    function ns.UnitExists(unit, ...)
         if isPlateToken(unit) then
             local f = tokenToPlate[unit]
             return f and f:IsShown() and true or false
@@ -386,7 +386,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitExists(unit, ...)
     end
 
-    function UnitName(unit, ...)
+    function ns.UnitName(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitName(real) end
@@ -395,7 +395,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitName(unit, ...)
     end
 
-    function UnitGUID(unit, ...)
+    function ns.UnitGUID(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitGUID(real) end
@@ -404,7 +404,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitGUID(unit, ...)
     end
 
-    function UnitClass(unit, ...)
+    function ns.UnitClass(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitClass(real) end
@@ -417,7 +417,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitClass(unit, ...)
     end
 
-    function UnitLevel(unit, ...)
+    function ns.UnitLevel(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitLevel(real) end
@@ -426,7 +426,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitLevel(unit, ...)
     end
 
-    function UnitHealth(unit, ...)
+    function ns.UnitHealth(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitHealth(real) end
@@ -436,7 +436,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitHealth(unit, ...)
     end
 
-    function UnitHealthMax(unit, ...)
+    function ns.UnitHealthMax(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitHealthMax(real) end
@@ -446,7 +446,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitHealthMax(unit, ...)
     end
 
-    function UnitIsPlayer(unit, ...)
+    function ns.UnitIsPlayer(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitIsPlayer(real) end
@@ -457,7 +457,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitIsPlayer(unit, ...)
     end
 
-    function UnitIsUnit(unitA, unitB, ...)
+    function ns.UnitIsUnit(unitA, unitB, ...)
         local aPlate, bPlate = isPlateToken(unitA), isPlateToken(unitB)
         if aPlate or bPlate then
             if aPlate and bPlate then
@@ -483,7 +483,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitIsUnit(unitA, unitB, ...)
     end
 
-    function UnitIsFriend(unitA, unitB, ...)
+    function ns.UnitIsFriend(unitA, unitB, ...)
         if isPlateToken(unitB) then
             local f, real = ResolveToken(unitB)
             if real then return _UnitIsFriend(unitA, real) end
@@ -499,7 +499,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitIsFriend(unitA, unitB, ...)
     end
 
-    function UnitReaction(unitA, unitB, ...)
+    function ns.UnitReaction(unitA, unitB, ...)
         local function reactFor(token)
             local f, real = ResolveToken(token)
             if real then return _UnitReaction("player", real) end
@@ -515,7 +515,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitReaction(unitA, unitB, ...)
     end
 
-    function UnitCanAttack(unitA, unitB, ...)
+    function ns.UnitCanAttack(unitA, unitB, ...)
         if isPlateToken(unitB) then
             local f, real = ResolveToken(unitB)
             if real then return _UnitCanAttack(unitA, real) end
@@ -531,7 +531,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitCanAttack(unitA, unitB, ...)
     end
 
-    function UnitCreatureType(unit, ...)
+    function ns.UnitCreatureType(unit, ...)
         if isPlateToken(unit) then
             local _, real = ResolveToken(unit)
             if real then return _UnitCreatureType(real) end
@@ -540,7 +540,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitCreatureType(unit, ...)
     end
 
-    function UnitIsPet(unit, ...)
+    function ns.UnitIsPet(unit, ...)
         if isPlateToken(unit) then
             local _, real = ResolveToken(unit)
             if real then return _UnitIsPet(real) end
@@ -549,7 +549,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitIsPet(unit, ...)
     end
 
-    function UnitIsDead(unit, ...)
+    function ns.UnitIsDead(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
             if real then return _UnitIsDead(real) end
@@ -559,7 +559,7 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitIsDead(unit, ...)
     end
 
-    function UnitClassification(unit, ...)
+    function ns.UnitClassification(unit, ...)
         if isPlateToken(unit) then
             local _, real = ResolveToken(unit)
             if real then return _UnitClassification(real) end
@@ -569,7 +569,7 @@ if not HAVE_NATIVE_ENGINE then
     end
 
     if _UnitIsTapped then
-        function UnitIsTapped(unit, ...)
+        function ns.UnitIsTapped(unit, ...)
             if isPlateToken(unit) then
                 local f, real = ResolveToken(unit)
                 if real then return _UnitIsTapped(real) end
@@ -580,7 +580,7 @@ if not HAVE_NATIVE_ENGINE then
     end
 
     if _UnitAffectingCombat then
-        function UnitAffectingCombat(unit, ...)
+        function ns.UnitAffectingCombat(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitAffectingCombat(real) end
@@ -592,7 +592,7 @@ if not HAVE_NATIVE_ENGINE then
 
     local _UnitPlayerControlled = UnitPlayerControlled
     if _UnitPlayerControlled then
-        function UnitPlayerControlled(unit, ...)
+        function ns.UnitPlayerControlled(unit, ...)
             if isPlateToken(unit) then
                 local f, real = ResolveToken(unit)
                 if real then return _UnitPlayerControlled(real) end
@@ -605,7 +605,7 @@ if not HAVE_NATIVE_ENGINE then
 
     local _UnitIsTappedByPlayer = UnitIsTappedByPlayer
     if _UnitIsTappedByPlayer then
-        function UnitIsTappedByPlayer(unit, ...)
+        function ns.UnitIsTappedByPlayer(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitIsTappedByPlayer(real) end
@@ -621,7 +621,7 @@ if not HAVE_NATIVE_ENGINE then
     local _UnitPowerMax = UnitPowerMax
     local _UnitPowerType= UnitPowerType
     if _UnitPower then
-        function UnitPower(unit, ...)
+        function ns.UnitPower(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitPower(real, ...) end
@@ -631,7 +631,7 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
     if _UnitPowerMax then
-        function UnitPowerMax(unit, ...)
+        function ns.UnitPowerMax(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitPowerMax(real, ...) end
@@ -641,7 +641,7 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
     if _UnitPowerType then
-        function UnitPowerType(unit, ...)
+        function ns.UnitPowerType(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitPowerType(real, ...) end
@@ -657,7 +657,7 @@ if not HAVE_NATIVE_ENGINE then
     local _UnitCastingInfo = UnitCastingInfo
     local _UnitChannelInfo = UnitChannelInfo
     if _UnitCastingInfo then
-        function UnitCastingInfo(unit, ...)
+        function ns.UnitCastingInfo(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitCastingInfo(real) end
@@ -667,7 +667,7 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
     if _UnitChannelInfo then
-        function UnitChannelInfo(unit, ...)
+        function ns.UnitChannelInfo(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitChannelInfo(real) end
@@ -682,7 +682,7 @@ if not HAVE_NATIVE_ENGINE then
     local _UnitDebuff = UnitDebuff
     local _UnitAura   = UnitAura
     if _UnitBuff then
-        function UnitBuff(unit, ...)
+        function ns.UnitBuff(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitBuff(real, ...) end
@@ -692,7 +692,7 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
     if _UnitDebuff then
-        function UnitDebuff(unit, ...)
+        function ns.UnitDebuff(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitDebuff(real, ...) end
@@ -702,7 +702,7 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
     if _UnitAura then
-        function UnitAura(unit, ...)
+        function ns.UnitAura(unit, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if real then return _UnitAura(real, ...) end
@@ -719,7 +719,7 @@ if not HAVE_NATIVE_ENGINE then
     -- than erroring.
     local _UnitDetailedThreatSituation = UnitDetailedThreatSituation
     if _UnitDetailedThreatSituation then
-        function UnitDetailedThreatSituation(unit, mob, ...)
+        function ns.UnitDetailedThreatSituation(unit, mob, ...)
             if isPlateToken(unit) then
                 local _, real = ResolveToken(unit)
                 if not real then return nil end

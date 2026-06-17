@@ -3,8 +3,10 @@ local addonName, ns = ...
 -- =============================================================================
 -- LOCALIZED GLOBALS
 -- =============================================================================
-local UnitExists = UnitExists
-local UnitIsFriend = UnitIsFriend
+-- Routed through compat wrappers (ns.UnitX) for plate tokens; do NOT reassign the
+-- real globals (would taint Blizzard secure code). Falls back on a native engine.
+local UnitExists = ns.UnitExists or UnitExists
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
 local GetTime = GetTime
 local GetSpellInfo = GetSpellInfo
 local pairs, ipairs = pairs, ipairs

@@ -43,17 +43,24 @@ StaticPopupDialogs["TURBOPLATES_ADDON_CONFLICT"] = {
     hideOnEscape = false,
 }
 
--- Cache frequently used globals
-local UnitExists = UnitExists
-local UnitName = UnitName
-local UnitClass = UnitClass
-local UnitIsPlayer = UnitIsPlayer
-local UnitIsFriend = UnitIsFriend
-local UnitIsUnit = UnitIsUnit
-local UnitIsPet = UnitIsPet
-local UnitPlayerControlled = UnitPlayerControlled
-local UnitCreatureType = UnitCreatureType
-local UnitGUID = UnitGUID
+-- Cache frequently used globals.
+-- NOTE: route the unit API through the WotLK compat wrappers (ns.UnitX) so plate
+-- tokens resolve. These MUST NOT be assigned back to the real globals or we taint
+-- Blizzard's secure code (broke target-clear / "Dead" on death). Falls back to the
+-- real global on a native engine where no wrapper exists.
+local UnitExists = ns.UnitExists or UnitExists
+local UnitName = ns.UnitName or UnitName
+local UnitClass = ns.UnitClass or UnitClass
+local UnitIsPlayer = ns.UnitIsPlayer or UnitIsPlayer
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitIsUnit = ns.UnitIsUnit or UnitIsUnit
+local UnitIsPet = ns.UnitIsPet or UnitIsPet
+local UnitPlayerControlled = ns.UnitPlayerControlled or UnitPlayerControlled
+local UnitCreatureType = ns.UnitCreatureType or UnitCreatureType
+local UnitGUID = ns.UnitGUID or UnitGUID
+local UnitHealth = ns.UnitHealth or UnitHealth
+local UnitHealthMax = ns.UnitHealthMax or UnitHealthMax
+local UnitLevel = ns.UnitLevel or UnitLevel
 local GetTime = GetTime
 local GetRaidTargetIndex = GetRaidTargetIndex
 local SetRaidTargetIconTexture = SetRaidTargetIconTexture

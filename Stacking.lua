@@ -41,13 +41,16 @@ local pairs = pairs
 local GetTime = GetTime
 local wipe = wipe
 local sort = table.sort
-local UnitIsFriend = UnitIsFriend
-local UnitIsDead = UnitIsDead
-local UnitGUID = UnitGUID
-local UnitIsPet = UnitIsPet
-local UnitCreatureType = UnitCreatureType
-local UnitPlayerControlled = UnitPlayerControlled
-local UnitIsPlayer = UnitIsPlayer
+-- Routed through compat wrappers (ns.UnitX) for plate tokens; do NOT reassign the
+-- real globals (would taint Blizzard secure code). Falls back on a native engine.
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitIsDead = ns.UnitIsDead or UnitIsDead
+local UnitGUID = ns.UnitGUID or UnitGUID
+local UnitIsPet = ns.UnitIsPet or UnitIsPet
+local UnitCreatureType = ns.UnitCreatureType or UnitCreatureType
+local UnitPlayerControlled = ns.UnitPlayerControlled or UnitPlayerControlled
+local UnitIsPlayer = ns.UnitIsPlayer or UnitIsPlayer
+local UnitIsUnit = ns.UnitIsUnit or UnitIsUnit
 local EnumerateActiveNamePlates = C_NamePlateManager.EnumerateActiveNamePlates
 local EMPTY_GUID = ""  -- Cached empty string for comparator
 

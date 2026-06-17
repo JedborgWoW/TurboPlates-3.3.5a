@@ -9,10 +9,13 @@ local format = string.format
 local floor = math.floor
 local GetTime = GetTime
 local CreateFrame = CreateFrame
-local UnitCastingInfo = UnitCastingInfo
-local UnitChannelInfo = UnitChannelInfo
-local UnitIsFriend = UnitIsFriend
-local UnitCreatureType = UnitCreatureType
+-- Routed through compat wrappers (ns.UnitX) for plate tokens; do NOT reassign the
+-- real globals (would taint Blizzard secure code). Falls back on a native engine.
+local UnitCastingInfo = ns.UnitCastingInfo or UnitCastingInfo
+local UnitChannelInfo = ns.UnitChannelInfo or UnitChannelInfo
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitCreatureType = ns.UnitCreatureType or UnitCreatureType
+local UnitIsUnit = ns.UnitIsUnit or UnitIsUnit
 local sub = string.sub
 local PixelUtil = PixelUtil
 

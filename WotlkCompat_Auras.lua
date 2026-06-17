@@ -14,8 +14,11 @@
 local addonName, ns = ...
 if ns.Compat and ns.Compat.HAS_NATIVE_ENGINE then return end
 
-local UnitAura = UnitAura   -- exists on 3.3.5a (singular); wrapped? no - aura
-                            -- data can't be scraped, so this stays the raw fn.
+-- Route through the compat wrappers (ns.UnitX) so the AuraUtil shims below resolve
+-- plate tokens to their matched real unit. Falls back to the raw fn on a native
+-- engine (where no wrapper exists).
+local UnitAura   = ns.UnitAura   or UnitAura   -- singular on 3.3.5a
+local UnitExists = ns.UnitExists or UnitExists
 
 ---------------------------------------------------------------------------
 -- AuraUtil.ForEachAura(unit, filter, maxCount, callback)

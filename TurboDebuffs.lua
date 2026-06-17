@@ -4,7 +4,9 @@ local addonName, ns = ...
 -- Ported from BigDebuffs by Jordon with Ascension fixes
 
 local GetTime = GetTime
-local UnitGUID = UnitGUID
+-- Unit API routed through compat wrappers (ns.UnitX) for plate tokens; do NOT
+-- reassign the real globals (taints secure code). Falls back on a native engine.
+local UnitGUID = ns.UnitGUID or UnitGUID
 local GetSpellInfo = GetSpellInfo
 local CreateFrame = CreateFrame
 local ceil = math.ceil
@@ -15,9 +17,12 @@ local format = string.format
 local AuraUtil = AuraUtil
 local rawset = rawset
 local rawget = rawget
-local UnitIsUnit = UnitIsUnit
-local UnitCreatureType = UnitCreatureType
-local UnitIsFriend = UnitIsFriend
+local UnitIsUnit = ns.UnitIsUnit or UnitIsUnit
+local UnitCreatureType = ns.UnitCreatureType or UnitCreatureType
+local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitAura = ns.UnitAura or UnitAura
+local UnitBuff = ns.UnitBuff or UnitBuff
+local UnitDebuff = ns.UnitDebuff or UnitDebuff
 
 -- Cached blacklist reference (set after initialization)
 local AuraBlacklist
