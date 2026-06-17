@@ -97,6 +97,80 @@ if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
 end
 
 ---------------------------------------------------------------------------
+-- CreateFramePool / CreateTexturePool / CreateObjectPool
+-- The bundled LibCustomGlow-1.0 calls these at FILE-LOAD scope (it builds its
+-- GlowTexPool/GlowFramePool/ButtonGlowPool up front). They are retail globals
+-- that don't exist on stock 3.3.5a; ClassicAPI used to supply them. Without it
+-- the lib errored at load and registered only a half-built table, which is why
+-- PixelGlow_* came back nil. Provide minimal pools so the lib loads and the
+-- glow actually works standalone. Must run before LibCustomGlow in the .toc
+-- (WotlkCompat_API loads first), which it does.
+---------------------------------------------------------------------------
+if type(CreateFramePool) ~= "function" then
+    local function Pool_Acquire(self)
+        local obj = next(self.inactiveObjects)
+        if obj then
+            self.inactiveObjects[obj] = nil
+        else
+            obj = self.createFunc(self)
+        end
+        self.activeObjects[obj] = true
+        return obj, (obj ~= nil)
+    end
+    local function Pool_Release(self, obj)
+        if not self.activeObjects[obj] then return end
+        self.activeObjects[obj] = nil
+        self.inactiveObjects[obj] = true
+        if self.resetterFunc then self.resetterFunc(self, obj) else obj:Hide() end
+    end
+    local function Pool_ReleaseAll(self)
+        for obj in pairs(self.activeObjects) do self:Release(obj) end
+    end
+    local function NewPool(createFunc, resetterFunc)
+        return {
+            activeObjects   = {},
+            inactiveObjects = {},
+            createFunc      = createFunc,
+            resetterFunc    = resetterFunc,
+            Acquire         = Pool_Acquire,
+            Release         = Pool_Release,
+            ReleaseAll      = Pool_ReleaseAll,
+        }
+    end
+
+    function CreateFramePool(frameType, parent, template, resetterFunc)
+        return NewPool(function()
+            return CreateFrame(frameType or "Frame", nil, parent, template)
+        end, resetterFunc)
+    end
+    function CreateTexturePool(parent, layer, subLayer, resetterFunc, textureName)
+        return NewPool(function()
+            return parent:CreateTexture(nil, layer, textureName, subLayer)
+        end, resetterFunc)
+    end
+    function CreateObjectPool(createFunc, resetterFunc)
+        return NewPool(createFunc, resetterFunc)
+    end
+    _G.CreateFramePool   = CreateFramePool
+    _G.CreateTexturePool = CreateTexturePool
+    _G.CreateObjectPool  = CreateObjectPool
+end
+
+---------------------------------------------------------------------------
+-- CombatLogGetCurrentEventInfo
+-- HealerDetection.lua calls this (retail CLEU accessor). On stock 3.3.5a the
+-- CLEU args arrive as the event payload instead, so the global is absent and
+-- the call threw. HealerDetection passes the handler's varargs straight in, so
+-- a pass-through is the right shim here.
+---------------------------------------------------------------------------
+if type(CombatLogGetCurrentEventInfo) ~= "function" then
+    function CombatLogGetCurrentEventInfo(...)
+        return ...
+    end
+    _G.CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
+end
+
+---------------------------------------------------------------------------
 -- CreateColor / ColorMixin / WrapTextInColorCode
 ---------------------------------------------------------------------------
 if type(CreateColor) ~= "function" then
