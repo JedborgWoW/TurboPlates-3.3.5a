@@ -486,24 +486,24 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitExists(unit, ...)
     end
 
+    -- DISPLAY DATA IS SCRAPED, NOT TAKEN FROM THE MATCHED TOKEN.
+    -- This follows how NotPlater works on real 3.3.5a: the plate's own regions
+    -- (name/level FontStrings, health-bar value + colour) are the source of truth
+    -- for everything visible. A matched real unit is only cross-referenced for
+    -- token-only extras that can't be scraped (GUID, auras, casts, threat). The
+    -- match heuristic (name+level+health) can bind to the WRONG unit - e.g. a
+    -- recycled plate briefly stuck on a previous target ("Mogg" on a Sunscale,
+    -- wrong colour/level) - so the visible data must never depend on it.
     function ns.UnitName(unit, ...)
         if isPlateToken(unit) then
-            local f, real = ResolveToken(unit)
-            if real then
-                -- A matched real unit token (e.g. raidNtarget) can be out of range,
-                -- where UnitName returns the localized UNKNOWN ("Unknown") - which
-                -- then renders on the plate. The scraped plate name is always
-                -- correct, so prefer the real name only when it's actually known.
-                local n = _UnitName(real)
-                if n and n ~= UNKNOWN and n ~= "Unknown" then return n end
-            end
-            return PlateName(f)
+            return PlateName(tokenToPlate[unit])
         end
         return _UnitName(unit, ...)
     end
 
     function ns.UnitGUID(unit, ...)
         if isPlateToken(unit) then
+            -- token-only: real GUID if matched, else a stable synthetic one
             local f, real = ResolveToken(unit)
             if real then return _UnitGUID(real) end
             return f and f._tpSyntheticGUID or nil
@@ -514,11 +514,12 @@ if not HAVE_NATIVE_ENGINE then
     function ns.UnitClass(unit, ...)
         if isPlateToken(unit) then
             local f, real = ResolveToken(unit)
-            if real then return _UnitClass(real) end
+            -- class is keyed by the scraped name first (only players need it)
             local name = PlateName(f)
-            if name and classCache[name] then
+            if name and classTokenCache[name] then
                 return classCache[name], classTokenCache[name]
             end
+            if real then return _UnitClass(real) end
             return (UNKNOWN or "Unknown"), nil
         end
         return _UnitClass(unit, ...)
@@ -526,28 +527,21 @@ if not HAVE_NATIVE_ENGINE then
 
     function ns.UnitLevel(unit, ...)
         if isPlateToken(unit) then
-            local f, real = ResolveToken(unit)
-            if real then return _UnitLevel(real) end
-            return PlateLevel(f) or -1
+            return PlateLevel(tokenToPlate[unit]) or -1
         end
         return _UnitLevel(unit, ...)
     end
 
     function ns.UnitHealth(unit, ...)
         if isPlateToken(unit) then
-            local f, real = ResolveToken(unit)
-            if real then return _UnitHealth(real) end
-            local cur = PlateHealth(f)
-            return cur or 0
+            return PlateHealth(tokenToPlate[unit]) or 0
         end
         return _UnitHealth(unit, ...)
     end
 
     function ns.UnitHealthMax(unit, ...)
         if isPlateToken(unit) then
-            local f, real = ResolveToken(unit)
-            if real then return _UnitHealthMax(real) end
-            local _, max = PlateHealth(f)
+            local _, max = PlateHealth(tokenToPlate[unit])
             return max or 0
         end
         return _UnitHealthMax(unit, ...)
@@ -555,8 +549,7 @@ if not HAVE_NATIVE_ENGINE then
 
     function ns.UnitIsPlayer(unit, ...)
         if isPlateToken(unit) then
-            local f, real = ResolveToken(unit)
-            if real then return _UnitIsPlayer(real) end
+            local f = tokenToPlate[unit]
             local name = PlateName(f)
             if name and isPlayerCache[name] ~= nil then return isPlayerCache[name] end
             return PlateReaction(f) == "friendlyPlayer"
@@ -570,37 +563,31 @@ if not HAVE_NATIVE_ENGINE then
             if aPlate and bPlate then
                 return tokenToPlate[unitA] == tokenToPlate[unitB]
             end
-            if aPlate then
-                local _, ra = ResolveToken(unitA)
-                if ra then return _UnitIsUnit(ra, unitB) end
-                local plateName = PlateName(tokenToPlate[unitA])
-                if plateName and _UnitExists(unitB) then
-                    return plateName == _UnitName(unitB)
-                end
-                return false
+            -- Plate vs real unit: compare the SCRAPED plate name to the unit's
+            -- name. Names collide (many mobs share one), so for the target the
+            -- engine renders the matching plate at full alpha and dims the rest -
+            -- disambiguate by opacity, exactly like NotPlater's IsTarget.
+            local plateTok = aPlate and unitA or unitB
+            local other    = aPlate and unitB or unitA
+            local f = tokenToPlate[plateTok]
+            local plateName = f and PlateName(f)
+            if not plateName or not _UnitExists(other) then return false end
+            if plateName ~= _UnitName(other) then return false end
+            if other == "target" then
+                return f:GetAlpha() >= 0.99
             end
-            local _, rb = ResolveToken(unitB)
-            if rb then return _UnitIsUnit(unitA, rb) end
-            local plateName = PlateName(tokenToPlate[unitB])
-            if plateName and _UnitExists(unitA) then
-                return plateName == _UnitName(unitA)
-            end
-            return false
+            return true
         end
         return _UnitIsUnit(unitA, unitB, ...)
     end
 
     function ns.UnitIsFriend(unitA, unitB, ...)
         if isPlateToken(unitB) then
-            local f, real = ResolveToken(unitB)
-            if real then return _UnitIsFriend(unitA, real) end
-            local rk = PlateReaction(f)
+            local rk = PlateReaction(tokenToPlate[unitB])
             return rk == "friendly" or rk == "friendlyPlayer"
         end
         if isPlateToken(unitA) then
-            local f, real = ResolveToken(unitA)
-            if real then return _UnitIsFriend(real, unitB) end
-            local rk = PlateReaction(f)
+            local rk = PlateReaction(tokenToPlate[unitA])
             return rk == "friendly" or rk == "friendlyPlayer"
         end
         return _UnitIsFriend(unitA, unitB, ...)
@@ -608,9 +595,7 @@ if not HAVE_NATIVE_ENGINE then
 
     function ns.UnitReaction(unitA, unitB, ...)
         local function reactFor(token)
-            local f, real = ResolveToken(token)
-            if real then return _UnitReaction("player", real) end
-            local rk = PlateReaction(f)
+            local rk = PlateReaction(tokenToPlate[token])
             if rk == "hostile"  then return 2 end
             if rk == "neutral"  then return 4 end
             if rk == "friendly" or rk == "friendlyPlayer" then return 6 end
@@ -624,15 +609,11 @@ if not HAVE_NATIVE_ENGINE then
 
     function ns.UnitCanAttack(unitA, unitB, ...)
         if isPlateToken(unitB) then
-            local f, real = ResolveToken(unitB)
-            if real then return _UnitCanAttack(unitA, real) end
-            local rk = PlateReaction(f)
+            local rk = PlateReaction(tokenToPlate[unitB])
             return rk == "hostile" or rk == "neutral" or rk == "tapped"
         end
         if isPlateToken(unitA) then
-            local f, real = ResolveToken(unitA)
-            if real then return _UnitCanAttack(real, unitB) end
-            local rk = PlateReaction(f)
+            local rk = PlateReaction(tokenToPlate[unitA])
             return rk == "hostile" or rk == "neutral" or rk == "tapped"
         end
         return _UnitCanAttack(unitA, unitB, ...)
@@ -658,10 +639,7 @@ if not HAVE_NATIVE_ENGINE then
 
     function ns.UnitIsDead(unit, ...)
         if isPlateToken(unit) then
-            local f, real = ResolveToken(unit)
-            if real then return _UnitIsDead(real) end
-            local cur = PlateHealth(f)
-            return cur == 0
+            return PlateHealth(tokenToPlate[unit]) == 0
         end
         return _UnitIsDead(unit, ...)
     end
