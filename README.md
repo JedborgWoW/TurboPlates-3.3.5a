@@ -1,10 +1,11 @@
-All rights to the Original Creator `Nico aka [esurm@github](https://github.com/esurm)`
+# TurboPlates 3.3.5a
 
-# TurboPlates
+Lightweight nameplate addon for **World of Warcraft 3.3.5a (WotLK, client 30300)**.
 
-Lightweight nameplate addon, built from scratch for WoW 3.3.5a (w/ Ascension API).
-
-Backported to pure 3.3.5a Core by Jedborg.
+This is an **independent backport** of TurboPlates to a stock, unpatched 3.3.5a
+core. The original TurboPlates was written for Ascension's modern nameplate
+engine; this fork rebuilds the data layer so it runs on a plain 3.3.5a client.
+See [`BACKPORT_NOTES.md`](BACKPORT_NOTES.md) for the technical details.
 
 ## Features
 
@@ -16,7 +17,7 @@ Backported to pure 3.3.5a Core by Jedborg.
 - Whitelist/blacklist filtering
 - Dispellable buff highlighting
 - TurboDebuffs (BigDebuffs port) integration for priority aura tracking
-- HHTD (Healers have to Die) integration
+- HHTD (Healers Have To Die) integration
 - Personal Resource Bar customization
 - Arena enemy numbering
 - "Targeting me" indicator for arenas
@@ -27,8 +28,8 @@ Backported to pure 3.3.5a Core by Jedborg.
 
 ## Installation
 
-1. Download and extract to `Interface\AddOns\TurboPlates`
-2. Rename folder to `TurboPlates` (removing the version)
+1. Download and extract into `Interface\AddOns\`
+2. Rename the folder to `TurboPlates` (remove the version suffix)
 3. Restart the game
 
 ## Usage
@@ -39,28 +40,42 @@ Type `/tp` or `/turboplates` to open the options panel, or use the minimap butto
 
 Settings are organized into tabs:
 
-- **General** - Friendly plates, PvP options and more
-- **Nameplate Style** - Dimensions, textures, scale etc.
-- **Nameplate Texts** - Font, name format, health values, level display
-- **Colors** - Health, threat, tank mode colors
-- **Castbars** - Castbar appearance and highlight spells
-- **Debuffs/Buffs** - Aura filtering and display
-- **Personal Bar** - Your own nameplate settings
-- **Combo Points** - Style and colors
-- **TurboDebuffs** - Priority debuff tracking
-- **Plate Stacking** - Overlap prevention settings
-- **Profiles** - Import/export configuration
+- **General** — Friendly plates, PvP options and more
+- **Nameplate Style** — Dimensions, textures, scale etc.
+- **Nameplate Texts** — Font, name format, health values, level display
+- **Colors** — Health, threat, tank mode colors
+- **Castbars** — Castbar appearance and highlight spells
+- **Debuffs/Buffs** — Aura filtering and display
+- **Personal Bar** — Your own nameplate settings
+- **Combo Points** — Style and colors
+- **TurboDebuffs** — Priority debuff tracking
+- **Plate Stacking** — Overlap prevention settings
+- **Profiles** — Import/export configuration
 
-## Dependencies
+## Bundled libraries
 
-Includes the following libraries:
 - LibStub
 - CallbackHandler-1.0
 - LibCustomGlow-1.0
 - LibDeflate
 - AceSerializer-3.0
 - LibSharedMedia-3.0
-=======
-# TurboPlates-3.3.5a
-Ascension TurboPlates backported to 3.3.5a
->>>>>>> 3d766499502c7d5b7e6e47be6a213cb209415608
+
+## Credits & license
+
+TurboPlates is released under the [MIT License](LICENSE).
+
+- Original **TurboPlates** by Miko ([esurm](https://github.com/esurm)) — © 2026.
+- **3.3.5a backport** by Jedborg — © 2026.
+
+The MIT license requires the original copyright notice to be kept; it is
+retained in [`LICENSE`](LICENSE) alongside the backport copyright.
+
+## Disclaimer / non-affiliation
+
+This is an unofficial, independent fork maintained separately for the stock
+3.3.5a client. It is **not affiliated with, endorsed by, sponsored by, or
+supported by** the original TurboPlates author or the Ascension project. Please
+do **not** direct support requests for this backport to the original developer —
+[open an issue here](../../issues) instead. All trademarks and original work
+belong to their respective owners.
