@@ -12,16 +12,16 @@ btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 local overlay = btn:CreateTexture(nil, "OVERLAY")
 overlay:SetSize(53, 53)
 overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-overlay:SetPoint("TOPLEFT")
+-- Center the ring on the button so the transparent hole aligns with the button
+-- center. TOPLEFT anchoring put the hole at (26,-26) from the button corner,
+-- which is 11px away from the icon (centered at (15,-15)), so the opaque ring
+-- covered the icon and it looked empty.
+overlay:SetPoint("CENTER", btn, "CENTER")
 
--- Anchor the icon TOPLEFT (like LibDBIcon) so it lands inside the transparent
--- hole of the 53x53 TrackingBorder ring. Anchoring CENTER put it under the
--- opaque part of the ring, so only the ring showed with an empty middle. The
--- texcoord crop trims the icon's built-in dark border so it fills the hole.
 local icon = btn:CreateTexture(nil, "ARTWORK")
 icon:SetSize(19, 19)
 icon:SetTexture("Interface\\Icons\\INV_Misc_Rune01")
-icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, -6)
+icon:SetPoint("CENTER", btn, "CENTER")
 icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
 local function UpdatePosition()

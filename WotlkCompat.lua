@@ -821,15 +821,23 @@ if not HAVE_NATIVE_ENGINE then
 
     -- Raid target marker. GetRaidTargetIndex(unit) is called with our synthetic
     -- plate token; the native C function doesn't understand it and returns garbage
-    -- (every plate showed a "Star" marker). Resolve plate tokens to their matched
-    -- real unit; an unbound plate has no real unit so report no marker (nil) - we
-    -- can't know an arbitrary plate's mark without a token.
+    -- (every plate showed a "Star" marker). Resolution order:
+    --   1. Matched real unit (target/focus/party member's target) - most reliable.
+    --   2. The Blizzard nameplate's native "nameplateN" unit attribute. The stock
+    --      3.3.5a client sets GetAttribute("unit") = "nameplate1" etc. on each
+    --      plate frame, and GetRaidTargetIndex("nameplateN") works natively - the
+    --      engine maps it to the mob C-side. This lets us show raid markers even
+    --      for mobs that aren't currently targeted/tracked.
     -- (defined unconditionally; _GetRaidTargetIndex is captured at file scope and
     -- re-bound in BindUnitOriginals, since on some cores it's nil at load.)
     function ns.GetRaidTargetIndex(unit, ...)
         if isPlateToken(unit) then
-            local _, real = ResolveToken(unit)
+            local f, real = ResolveToken(unit)
             if real then return _GetRaidTargetIndex(real) end
+            if f then
+                local blizzUnit = f.GetAttribute and f:GetAttribute("unit")
+                if blizzUnit then return _GetRaidTargetIndex(blizzUnit) end
+            end
             return nil
         end
         return _GetRaidTargetIndex(unit, ...)
