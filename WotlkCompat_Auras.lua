@@ -98,6 +98,36 @@ function ns.DebugDumpTargetAuras()
     local pName, _, _, _, _, pDur, _, pCaster = UnitAura(unit, 1, "HARMFUL|PLAYER")
     print(string.format("  native 'HARMFUL|PLAYER' idx1: name=%s caster=%s dur=%s",
         tostring(pName), tostring(pCaster), tostring(pDur)))
+
+    -- The nameplate display does NOT scan "target" directly; it scans the plate's
+    -- synthetic token, which only resolves to a real unit if the plate is matched.
+    -- Reproduce that exact path so we can see where it breaks.
+    local frame = C_NamePlate and C_NamePlate.GetNamePlateForUnit
+                  and C_NamePlate.GetNamePlateForUnit(unit) or nil
+    if not frame then
+        print("  PLATE: no nameplate matched to target -> auras can't bind (THIS is the gap)")
+        return
+    end
+    local mp = frame.myPlate
+    local token = mp and mp.unit
+    print(string.format("  PLATE: token=%s matchedUnit=%s c_showDebuffs=%s",
+        tostring(token), tostring(frame._tpMatchedUnit), tostring(ns.c_showDebuffs)))
+    if mp and mp.debuffContainer then
+        print(string.format("  CONTAINER: shown=%s displayedCount=%s",
+            tostring(mp.debuffContainer.IsShown and mp.debuffContainer:IsShown()),
+            tostring(mp.debuffContainer.displayedCount)))
+    else
+        print("  CONTAINER: none (debuff container not created on plate)")
+    end
+    local tn = 0
+    if token then
+        AuraUtil.ForEachAura(token, "HARMFUL|PLAYER", 40, function(nm)
+            tn = tn + 1
+            print("    token-scan ["..tn.."] "..tostring(nm))
+            return false
+        end)
+    end
+    print("  token 'HARMFUL|PLAYER' via display path returned "..tn.." aura(s)")
 end
 
 if NEED_AURA_SHIM or type(AuraUtil.FindAuraByName) ~= "function" then
