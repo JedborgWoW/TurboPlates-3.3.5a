@@ -41,10 +41,16 @@ if NEED_AURA_SHIM or type(AuraUtil.ForEachAura) ~= "function" then
         -- (TrinityCore et al.), so the enemy-debuff display - which scans with
         -- "HARMFUL|PLAYER" to show only your own DoTs - came up empty for every
         -- class. Ascension's native engine parsed the token, which is why it only
-        -- broke on the backport. Never pass "PLAYER" through; instead scan the
-        -- base HELPFUL/HARMFUL list and drop auras the player didn't cast by
-        -- checking unitCaster ourselves. This mirrors retail's "PLAYER" filter,
-        -- which is really isFromPlayerOrPlayerPet, so player + pet + vehicle pass.
+        -- broke on the backport. Never pass "PLAYER" through; scan the base
+        -- HELPFUL/HARMFUL list and decide "is it mine?" ourselves.
+        --
+        -- "Mine" via unitCaster mirrors retail's "PLAYER" filter, which is really
+        -- isFromPlayerOrPlayerPet, so player + pet + vehicle pass. But unitCaster
+        -- is unreliable on some 3.3.5a cores (returns nil for every aura); when it
+        -- is absent we must NOT silently drop everything. In that case we pass the
+        -- aura through and let the consumer's own duration>0 check do the work -
+        -- on 3.3.5a the client only timestamps auras YOU applied, so duration>0 is
+        -- itself a sound "cast by me" signal.
         local auraFilter = (filter:find("HARMFUL") and "HARMFUL" or "HELPFUL")
         local playerOnly = filter:find("PLAYER") and true or false
         local limit = maxCount or 40
@@ -53,8 +59,10 @@ if NEED_AURA_SHIM or type(AuraUtil.ForEachAura) ~= "function" then
                   caster, isStealable, shouldConsolidate, spellID,
                   canApplyAura, isBossDebuff, castByPlayer = UnitAura(unit, i, auraFilter)
             if not name then break end
-            if not playerOnly or caster == "player" or caster == "pet"
-               or caster == "vehicle" then
+            local mine = (not playerOnly)
+                or caster == "player" or caster == "pet" or caster == "vehicle"
+                or caster == nil  -- core didn't report a caster: defer to duration>0
+            if mine then
                 local stop = callback(name, rank, icon, count, debuffType, duration,
                     expires, caster, isStealable, shouldConsolidate, spellID,
                     canApplyAura, isBossDebuff, castByPlayer)
@@ -63,6 +71,35 @@ if NEED_AURA_SHIM or type(AuraUtil.ForEachAura) ~= "function" then
         end
     end
 end
+---------------------------------------------------------------------------
+-- Diagnostic: "/tp dumpaura" - dump what UnitAura actually returns for the
+-- current target on this core, so we can see whether unitCaster / duration /
+-- the "HARMFUL|PLAYER" token behave. Prints raw HARMFUL scan + the native
+-- combined-filter result.
+---------------------------------------------------------------------------
+function ns.DebugDumpTargetAuras()
+    local unit = "target"
+    if not UnitExists(unit) then
+        print("|cff4fa3ffTurboPlates|r dumpaura: no target")
+        return
+    end
+    print("|cff4fa3ffTurboPlates|r aura dump for "..tostring(UnitName(unit)))
+    local any = false
+    for i = 1, 40 do
+        local name, _, _, count, dtype, duration, expires, caster,
+              _, _, spellID, _, _, castByPlayer = UnitAura(unit, i, "HARMFUL")
+        if not name then break end
+        any = true
+        print(string.format("  [%d] %s | caster=%s castByPlayer=%s dur=%s exp=%s type=%s id=%s",
+            i, tostring(name), tostring(caster), tostring(castByPlayer),
+            tostring(duration), tostring(expires), tostring(dtype), tostring(spellID)))
+    end
+    if not any then print("  (no HARMFUL auras returned)") end
+    local pName, _, _, _, _, pDur, _, pCaster = UnitAura(unit, 1, "HARMFUL|PLAYER")
+    print(string.format("  native 'HARMFUL|PLAYER' idx1: name=%s caster=%s dur=%s",
+        tostring(pName), tostring(pCaster), tostring(pDur)))
+end
+
 if NEED_AURA_SHIM or type(AuraUtil.FindAuraByName) ~= "function" then
     function AuraUtil.FindAuraByName(name, unit, filter)
         if not unit or not UnitExists(unit) then return nil end
