@@ -1253,6 +1253,18 @@ local function IsNameplateUnit(unit)
     return unit and strsub(unit, 1, 9) == "nameplate"
 end
 
+-- On Ascension/retail UNIT_AURA fires with a nameplate unit token ("nameplate1")
+-- so the handler below can map the event straight to a plate. Stock 3.3.5a has
+-- NO nameplate unit tokens, so UNIT_AURA instead fires for the real unit
+-- (target/focus/mouseover/arenaN). Without this the enemy-plate aura display was
+-- never refreshed when auras changed - your DoTs never appeared. These are the
+-- units that both fire UNIT_AURA and get bound to a plate by the compat match
+-- tracker; an aura change on one must refresh its matching plate.
+local COMPAT_AURA_UNITS = ns.IS_WOTLK_COMPAT and {
+    target = true, focus = true, mouseover = true,
+    arena1 = true, arena2 = true, arena3 = true, arena4 = true, arena5 = true,
+} or nil
+
 -- =============================================================================
 -- EVENT HANDLER SETUP
 -- =============================================================================
@@ -1281,6 +1293,11 @@ local function SetupAuraEvents()
                     batchUnitsToUpdate[unit] = true
                 elseif unit == "player" and (trackPlayerAurasForDisplay or trackPlayerDebuffs) then
                     pendingPlayerAura = true
+                elseif COMPAT_AURA_UNITS and COMPAT_AURA_UNITS[unit] then
+                    -- Stock 3.3.5a: UNIT_AURA fired for the real unit, not a
+                    -- nameplate token. The loop below resolves it to its matched
+                    -- plate via GetNamePlateForUnit and updates with the real unit.
+                    batchUnitsToUpdate[unit] = true
                 end
             end
         end
