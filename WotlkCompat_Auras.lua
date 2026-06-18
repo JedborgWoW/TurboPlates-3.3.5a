@@ -36,18 +36,30 @@ if NEED_AURA_SHIM or type(AuraUtil.ForEachAura) ~= "function" then
     function AuraUtil.ForEachAura(unit, filter, maxCount, callback)
         if not unit or not UnitExists(unit) or type(callback) ~= "function" then return end
         filter = filter or "HELPFUL"
+        -- Stock 3.3.5a's UnitAura does NOT reliably honour the "PLAYER" filter
+        -- token: a combined "HARMFUL|PLAYER" returns nothing on common cores
+        -- (TrinityCore et al.), so the enemy-debuff display - which scans with
+        -- "HARMFUL|PLAYER" to show only your own DoTs - came up empty for every
+        -- class. Ascension's native engine parsed the token, which is why it only
+        -- broke on the backport. Never pass "PLAYER" through; instead scan the
+        -- base HELPFUL/HARMFUL list and drop auras the player didn't cast by
+        -- checking unitCaster ourselves. This mirrors retail's "PLAYER" filter,
+        -- which is really isFromPlayerOrPlayerPet, so player + pet + vehicle pass.
         local auraFilter = (filter:find("HARMFUL") and "HARMFUL" or "HELPFUL")
-        if filter:find("PLAYER") then auraFilter = auraFilter .. "|PLAYER" end
+        local playerOnly = filter:find("PLAYER") and true or false
         local limit = maxCount or 40
         for i = 1, limit do
             local name, rank, icon, count, debuffType, duration, expires,
                   caster, isStealable, shouldConsolidate, spellID,
                   canApplyAura, isBossDebuff, castByPlayer = UnitAura(unit, i, auraFilter)
             if not name then break end
-            local stop = callback(name, rank, icon, count, debuffType, duration,
-                expires, caster, isStealable, shouldConsolidate, spellID,
-                canApplyAura, isBossDebuff, castByPlayer)
-            if stop then break end
+            if not playerOnly or caster == "player" or caster == "pet"
+               or caster == "vehicle" then
+                local stop = callback(name, rank, icon, count, debuffType, duration,
+                    expires, caster, isStealable, shouldConsolidate, spellID,
+                    canApplyAura, isBossDebuff, castByPlayer)
+                if stop then break end
+            end
         end
     end
 end
