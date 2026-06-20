@@ -510,6 +510,17 @@ if not HAVE_NATIVE_ENGINE then
         return _UnitExists(unit, ...)
     end
 
+    -- Returns the real unit a plate token is bound to (target/focus/... ), or
+    -- nil if the plate isn't matched. A real unit token passes straight back.
+    -- Lets consumers tell "bound" plates (UnitAura works) from unbound ones.
+    function ns.GetPlateRealUnit(unit)
+        if isPlateToken(unit) then
+            local _, real = ResolveToken(unit)
+            return real
+        end
+        return unit
+    end
+
     -- DISPLAY DATA IS SCRAPED, NOT TAKEN FROM THE MATCHED TOKEN.
     -- This follows how NotPlater works on real 3.3.5a: the plate's own regions
     -- (name/level FontStrings, health-bar value + colour) are the source of truth
