@@ -7,6 +7,8 @@ local addonName, ns = ...
 -- real globals (would taint Blizzard secure code). Falls back on a native engine.
 local UnitExists = ns.UnitExists or UnitExists
 local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
+local UnitName = ns.UnitName or UnitName
+local UnitGUID = ns.UnitGUID or UnitGUID
 local GetTime = GetTime
 local GetSpellInfo = GetSpellInfo
 local pairs, ipairs = pairs, ipairs
@@ -27,6 +29,23 @@ local PixelUtil = PixelUtil
 
 -- Ascension API (may or may not exist)
 local C_Hook = C_Hook
+
+-- =============================================================================
+-- COMBAT-LOG PLAYER-DEBUFF TRACKING (stock 3.3.5a only)
+-- =============================================================================
+-- UnitAura needs a real unit token, which stock 3.3.5a only has for units you
+-- "know" (target/focus/mouseover/group/arena). So debuffs YOU apply to plates
+-- with no token - e.g. Death Knight diseases that Pestilence spreads to nearby
+-- mobs - can't be read and never show. To cover that, mirror the player's (and
+-- pet's) applied debuffs from the combat log, keyed by destination NAME, and
+-- merge them onto unbound plates in UpdateAuras. Durations aren't in the combat
+-- log, so they're LEARNED from real UnitAura reads on bound units (auto-adapts
+-- to talents like Epidemic); until learned, the icon shows without a timer.
+-- Limitation: unbound plates are name-only, so mobs sharing a name share the
+-- display. Native engines skip all of this (they read auras for real).
+local cleuAuras = {}        -- cleuAuras[destName][spellID] = { name, applied, stacks }
+local durationBySpell = {}  -- spellID -> duration, learned from UnitAura
+local playerGUID, petGUID
 
 -- =============================================================================
 -- CREATE TEXTURE BORDER UTILITY (uses shared system from Nameplates.lua)
@@ -764,6 +783,12 @@ local currentTime = 0
 local function ProcessAuraCallback(name, rank, icon, count, debuffType, duration, expires, caster, canStealOrPurge, _, spellID)
     if not name then return end
 
+    -- Learn this spell's real duration from a bound unit so combat-log-tracked
+    -- copies on unbound plates (Pestilence spread etc.) can show a timer.
+    if spellID and duration and duration > 0 and currentAuraType == "debuff" then
+        durationBySpell[spellID] = duration
+    end
+
     -- Filter check (pass debuffType for Magic-type stealable fallback)
     if not PassesFilters(spellID, duration, canStealOrPurge, currentAuraType, debuffType) then
         return
@@ -924,6 +949,121 @@ local function DisplayAuras(container, auras, maxCount, iconWidth, iconHeight, s
 end
 
 -- =============================================================================
+-- COMBAT-LOG TRACKING: capture, refresh, and merge player-applied debuffs
+-- (see top-of-file note). Only wired up under the stock-3.3.5a compat engine.
+-- =============================================================================
+do
+    if ns.IS_WOTLK_COMPAT then
+        -- Coalesce plate refreshes to one per frame: a single Pestilence fans out
+        -- many SPELL_AURA_APPLIED events, but we only need one update pass.
+        local dirtyNames = {}
+        local pending = false
+        local refresher = CreateFrame("Frame")
+        refresher:Hide()
+        refresher:SetScript("OnUpdate", function(self)
+            self:Hide()
+            pending = false
+            local mgr = C_NamePlateManager
+            if not mgr or not mgr.EnumerateActiveNamePlates then wipe(dirtyNames) return end
+            for nm in pairs(dirtyNames) do
+                dirtyNames[nm] = nil
+                for blizzFrame in mgr.EnumerateActiveNamePlates() do
+                    local mp = blizzFrame.myPlate
+                    if mp and not mp.isPlayer and mp.unit and UnitName(mp.unit) == nm then
+                        ns:UpdateAuras(mp, mp.unit)
+                    end
+                end
+            end
+        end)
+        local function MarkNameDirty(nm)
+            dirtyNames[nm] = true
+            if not pending then pending = true refresher:Show() end
+        end
+
+        -- Whose applied debuffs to mirror: the player and the player's pet.
+        local guidFrame = CreateFrame("Frame")
+        guidFrame:RegisterEvent("PLAYER_LOGIN")
+        guidFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        guidFrame:RegisterEvent("UNIT_PET")
+        guidFrame:SetScript("OnEvent", function(_, ev, unit)
+            if ev == "UNIT_PET" and unit ~= "player" then return end
+            playerGUID = UnitGUID("player")
+            petGUID = UnitExists("pet") and UnitGUID("pet") or nil
+        end)
+
+        -- 3.3.5a delivers the CLEU payload as event args (after self,event):
+        -- timestamp, subevent, srcGUID, srcName, srcFlags, dstGUID, dstName,
+        -- dstFlags, then spell args (spellId, spellName, spellSchool, auraType,
+        -- [amount]).
+        local APPLY = {
+            SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
+            SPELL_AURA_APPLIED_DOSE = true, SPELL_AURA_REMOVED_DOSE = true,
+        }
+        local clog = CreateFrame("Frame")
+        clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+        clog:SetScript("OnEvent", function(_, _, _, subevent, srcGUID, _, _,
+                _, destName, _, spellId, spellName, _, auraType, amount)
+            if srcGUID ~= playerGUID and srcGUID ~= petGUID then return end
+            if auraType ~= "DEBUFF" or not destName or not spellId then return end
+            if APPLY[subevent] then
+                local byName = cleuAuras[destName]
+                if not byName then byName = {} cleuAuras[destName] = byName end
+                local e = byName[spellId]
+                if not e then e = {} byName[spellId] = e end
+                e.name = spellName
+                e.applied = GetTime()
+                if subevent == "SPELL_AURA_APPLIED_DOSE"
+                   or subevent == "SPELL_AURA_REMOVED_DOSE" then
+                    e.stacks = amount
+                end
+                MarkNameDirty(destName)
+            elseif subevent == "SPELL_AURA_REMOVED" then
+                local byName = cleuAuras[destName]
+                if byName and byName[spellId] then
+                    byName[spellId] = nil
+                    MarkNameDirty(destName)
+                end
+            end
+        end)
+    end
+end
+
+-- Merge combat-log-tracked player debuffs onto an UNBOUND plate (one with no
+-- real unit token, so UnitAura returned nothing). Bound plates are left to
+-- UnitAura, which is authoritative. Entries past their learned duration are
+-- pruned; entries whose duration isn't known yet show as a timerless icon.
+local function MergeTrackedDebuffs(unit, collector)
+    if not ns.IS_WOTLK_COMPAT then return end
+    if ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit) then return end  -- bound
+    local name = UnitName(unit)
+    local byName = name and cleuAuras[name]
+    if not byName then return end
+    local now = GetTime()
+    for spellID, e in pairs(byName) do
+        local dur = durationBySpell[spellID]
+        -- Prune when past the learned duration, or - if the duration was never
+        -- learned (we never saw this spell on a bound unit) - after a safety cap
+        -- so a missed SPELL_AURA_REMOVED can't leave a stale icon forever.
+        if (dur and e.applied + dur <= now) or (not dur and now - e.applied > 30) then
+            byName[spellID] = nil
+        elseif not (ns.AuraBlacklist and rawget(ns.AuraBlacklist, spellID)) then
+            local aura = AcquireAuraData()
+            aura.name = e.name
+            aura.icon = GetCachedIcon(spellID, nil)
+            aura.count = e.stacks or 0
+            aura.debuffType = nil
+            aura.duration = dur or 0
+            aura.expires = dur and (e.applied + dur) or 0
+            aura.canStealOrPurge = false
+            aura.spellID = spellID
+            aura.isDebuff = true
+            aura.timeLeft = aura.expires > 0 and (aura.expires - now) or 0
+            tinsert(collector, aura)
+        end
+    end
+end
+
+-- =============================================================================
 -- MAIN UPDATE FUNCTION
 -- =============================================================================
 function ns:UpdateAuras(myPlate, unit)
@@ -1023,6 +1163,9 @@ function ns:UpdateAuras(myPlate, unit)
             currentAuraType = "debuff"
             currentCollector = debuffCollector
             AuraUtil.ForEachAura(unit, "HARMFUL|PLAYER", 40, ProcessAuraCallback)
+            -- Add combat-log-tracked debuffs for plates with no real unit token
+            -- (e.g. Pestilence-spread diseases on unbound adds). No-op when bound.
+            MergeTrackedDebuffs(unit, debuffCollector)
             myPlate.debuffContainer:Show()
         else
             AuraPool:ReleaseAll(myPlate.debuffContainer)
