@@ -1306,13 +1306,19 @@ OnNamePlateRemoved = function(_, unit, nameplate)
             -- TAINT FIX: Defer to next frame to break secure callback chain
             -- (pet nameplates removed during combat can propagate taint otherwise)
             local plate = nameplate.myPlate
+            local baseFrame = nameplate
             RunNextFrame(function()
-                if plate then
-                    plate:SetScale(ns.c_scale or 1)
-                    plate._lastScale = nil
-                    if ns.ClearTargetGlow then
-                        ns.ClearTargetGlow(plate)
-                    end
+                if not plate then return end
+                -- If the plate was re-shown before this fired (recycled to a unit -
+                -- e.g. the SAME target after looking away and back), FullPlateUpdate
+                -- already set the correct scale + glow on show; running this stale
+                -- reset would clobber it (the target plate snapping back to base
+                -- scale). Only clean up plates that are actually still gone.
+                if baseFrame and baseFrame:IsShown() then return end
+                plate:SetScale(ns.c_scale or 1)
+                plate._lastScale = nil
+                if ns.ClearTargetGlow then
+                    ns.ClearTargetGlow(plate)
                 end
             end)
             -- Clear targeting me indicator (prevent stale visuals on recycled plates)

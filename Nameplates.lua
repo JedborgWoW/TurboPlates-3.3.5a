@@ -5670,6 +5670,14 @@ function ns:FullPlateUpdate(myPlate, unit)
     else
         myPlate:SetScale(ns.c_scale)
     end
+    -- Not the target: clear any leftover target glow from this recycled plate's
+    -- previous occupant. FullPlateUpdate is authoritative for scale+glow on show,
+    -- which lets OnNamePlateRemoved's deferred cleanup safely skip re-shown plates
+    -- without leaving a stale glow behind. (A real target sets it again above, or
+    -- ValidateTargetPlate does right after this on the GUID path.)
+    if not isTarget then
+        UpdateTargetGlow(myPlate, false)
+    end
 
     -- Health & Color
     UpdateHealth(unit)
