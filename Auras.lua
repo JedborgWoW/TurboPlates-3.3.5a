@@ -1015,13 +1015,40 @@ do
             SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
             SPELL_AURA_APPLIED_DOSE = true, SPELL_AURA_REMOVED_DOSE = true,
         }
+        -- A CC broken by DAMAGE (Sap, Sheep, Gouge, ...) fires SPELL_AURA_BROKEN /
+        -- SPELL_AURA_BROKEN_SPELL, NOT SPELL_AURA_REMOVED - so listening only for
+        -- REMOVED left a broken Sap's icon stuck on the plate. Treat all three as
+        -- "the aura is gone". Note: SPELL_AURA_BROKEN_SPELL carries extra spell
+        -- args before auraType, so the positional auraType read is misaligned for
+        -- it; the removal path must not depend on auraType (only spellId, which is
+        -- positionally stable across all these subevents).
+        local REMOVE = {
+            SPELL_AURA_REMOVED = true,
+            SPELL_AURA_BROKEN = true,
+            SPELL_AURA_BROKEN_SPELL = true,
+        }
+        local function ForgetSpell(destGUID, spellId)
+            local g = cleuByGUID[destGUID]
+            if not (g and g.spells[spellId]) then return false end
+            g.spells[spellId] = nil
+            if not next(g.spells) then
+                cleuByGUID[destGUID] = nil
+                local idx = nameIndex[g.name]
+                if idx then
+                    idx[destGUID] = nil
+                    if not next(idx) then nameIndex[g.name] = nil end
+                end
+            end
+            return true
+        end
         local clog = CreateFrame("Frame")
         clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
         clog:SetScript("OnEvent", function(_, _, _, subevent, srcGUID, _, _,
                 destGUID, destName, _, spellId, spellName, _, auraType, amount)
             if srcGUID ~= playerGUID and srcGUID ~= petGUID then return end
-            if auraType ~= "DEBUFF" or not destGUID or not destName or not spellId then return end
+            if not destGUID or not destName or not spellId then return end
             if APPLY[subevent] then
+                if auraType ~= "DEBUFF" then return end  -- only mirror debuffs
                 local g = cleuByGUID[destGUID]
                 if not g then
                     g = { name = destName, spells = {} }
@@ -1039,20 +1066,35 @@ do
                     s.stacks = amount
                 end
                 MarkNameDirty(destName)
-            elseif subevent == "SPELL_AURA_REMOVED" then
-                local g = cleuByGUID[destGUID]
-                if g and g.spells[spellId] then
-                    g.spells[spellId] = nil
-                    if not next(g.spells) then
-                        cleuByGUID[destGUID] = nil
-                        local idx = nameIndex[g.name]
-                        if idx then
-                            idx[destGUID] = nil
-                            if not next(idx) then nameIndex[g.name] = nil end
-                        end
+            elseif REMOVE[subevent] then
+                if ForgetSpell(destGUID, spellId) then MarkNameDirty(destName) end
+            end
+        end)
+
+        -- Safety-net sweep: prune tracked debuffs that are past their learned
+        -- duration (or a 30s cap when the duration was never learned) and redraw
+        -- the affected plates. Without this, a stale icon could linger forever:
+        -- the per-merge prune in MergeTrackedDebuffs only runs when something else
+        -- already triggered a refresh, and it's skipped for bound plates entirely,
+        -- so an entry whose REMOVE event was missed had nothing to clear it. This
+        -- prunes cleuByGUID directly (independent of bound/unbound display) so the
+        -- documented cap actually fires.
+        local sweep = CreateFrame("Frame")
+        local sweepAccum = 0
+        sweep:SetScript("OnUpdate", function(_, elapsed)
+            sweepAccum = sweepAccum + elapsed
+            if sweepAccum < 0.5 then return end
+            sweepAccum = 0
+            local now = GetTime()
+            for guid, g in pairs(cleuByGUID) do
+                local name, changed = g.name, false
+                for spellID, s in pairs(g.spells) do
+                    local dur = durationBySpell[spellID]
+                    if (dur and s.applied + dur <= now) or (not dur and now - s.applied > 30) then
+                        if ForgetSpell(guid, spellID) then changed = true end
                     end
-                    MarkNameDirty(destName)
                 end
+                if changed then MarkNameDirty(name) end
             end
         end)
     end
