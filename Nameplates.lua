@@ -4868,11 +4868,58 @@ local GetNumQuestLeaderBoards = GetNumQuestLeaderBoards
 local GetQuestLogLeaderBoard = GetQuestLogLeaderBoard
 local GetNumQuestLogEntries = GetNumQuestLogEntries
 
--- (1) Hidden scanning tooltip. True if the unit's tooltip shows an IN-PROGRESS
--- objective line (x/y with x < y) -> we still need this mob.
+-- (1) Quest-log objective cache, rebuilt lazily after QUEST_LOG_UPDATE.
+--   questObjectiveTexts : raw in-progress objective strings (for name match).
+--   questObjectiveKeys  : the same with the " x/y" stripped (for tooltip match).
+local questObjectiveTexts = {}
+local questObjectiveKeys = {}
+local questNameMatchCache = {}
+local questCacheDirty = true
+ns.InvalidateQuestCache = function() questCacheDirty = true end
+
+-- Strip a trailing " : x/y" progress and a leading dash/bullet so the same
+-- objective matches whether it came from the quest log or the unit tooltip.
+local function NormalizeObjective(s)
+    if not s then return nil end
+    s = s:gsub("%s*:?%s*%d+%s*/%s*%d+%s*$", "")
+    s = s:gsub("^[%s%-%.•]+", "")
+    s = s:gsub("%s+$", "")
+    return s
+end
+
+local function RebuildQuestObjectiveCache()
+    questCacheDirty = false
+    wipe(questObjectiveTexts)
+    wipe(questObjectiveKeys)
+    wipe(questNameMatchCache)
+    local numEntries = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
+    for i = 1, numEntries do
+        local title, _, _, _, isHeader, _, isComplete = GetQuestLogTitle(i)
+        if title and not isHeader and not isComplete then
+            local numObj = (GetNumQuestLeaderBoards and GetNumQuestLeaderBoards(i)) or 0
+            for o = 1, numObj do
+                local text, _, finished = GetQuestLogLeaderBoard(o, i)
+                if text and not finished then
+                    questObjectiveTexts[#questObjectiveTexts + 1] = text
+                    local key = NormalizeObjective(text)
+                    if key and key ~= "" then questObjectiveKeys[key] = true end
+                end
+            end
+        end
+    end
+end
+
+-- (2) Hidden scanning tooltip. True if the unit's tooltip shows an IN-PROGRESS
+-- objective line (x/y, x < y) that matches one of OUR quest-log objectives. The
+-- quest-log cross-check matters: other addons (Questie, drop trackers) inject
+-- their own "x/y" lines into unit tooltips, which would false-positive otherwise
+-- (a "!" on a mob you have no quest for). Catches use-item/interact quests where
+-- the mob name isn't in the objective text (the tooltip still shows the progress).
 local questScanTip
 local function UnitTooltipHasQuestObjective(realUnit)
     if not realUnit then return false end
+    if questCacheDirty then RebuildQuestObjectiveCache() end
+    if not next(questObjectiveKeys) then return false end  -- no active objectives
     if not questScanTip then
         questScanTip = CreateFrame("GameTooltip", "TurboPlatesQuestScanTip", UIParent, "GameTooltipTemplate")
     end
@@ -4891,7 +4938,8 @@ local function UnitTooltipHasQuestObjective(realUnit)
             local cur, total = strmatch(text, "(%d+)%s*/%s*(%d+)")
             if cur then
                 cur, total = tonumber(cur), tonumber(total)
-                if cur and total and total > 0 and cur < total then
+                if cur and total and total > 0 and cur < total
+                   and questObjectiveKeys[NormalizeObjective(text)] then
                     found = true
                     break
                 end
@@ -4902,34 +4950,9 @@ local function UnitTooltipHasQuestObjective(realUnit)
     return found
 end
 
--- (2) Quest-log objective name cache. Stores the text of every in-progress
--- objective; a plate is a quest target if its name is a substring of one (locale-
--- independent: the mob name appears verbatim in "MobName slain: 3/10"). Rebuilt
--- lazily after QUEST_LOG_UPDATE.
-local questObjectiveTexts = {}
-local questNameMatchCache = {}
-local questCacheDirty = true
-ns.InvalidateQuestCache = function() questCacheDirty = true end
-
-local function RebuildQuestObjectiveCache()
-    questCacheDirty = false
-    wipe(questObjectiveTexts)
-    wipe(questNameMatchCache)
-    local numEntries = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
-    for i = 1, numEntries do
-        local title, _, _, _, isHeader, _, isComplete = GetQuestLogTitle(i)
-        if title and not isHeader and not isComplete then
-            local numObj = (GetNumQuestLeaderBoards and GetNumQuestLeaderBoards(i)) or 0
-            for o = 1, numObj do
-                local text, _, finished = GetQuestLogLeaderBoard(o, i)
-                if text and not finished then
-                    questObjectiveTexts[#questObjectiveTexts + 1] = text
-                end
-            end
-        end
-    end
-end
-
+-- (3) Name match: a plate is a quest target if its name is a substring of an
+-- in-progress objective (locale-independent: the mob name appears verbatim in
+-- "MobName slain: 3/10"). Works on unbound plates (no tooltip).
 local function PlateNameMatchesQuest(plateName)
     if not plateName or plateName == "" then return false end
     if questCacheDirty then RebuildQuestObjectiveCache() end
@@ -4987,11 +5010,16 @@ local function UpdateQuestIcon(unit)
     -- Quest info: prefer our native detector (no ClassicAPI needed; catches
     -- interact-quests via a tooltip scan of the bound unit AND kill/collect quests
     -- via quest-log name match on any plate). Fall back to ClassicAPI's
-    -- GetUnitQuestInfo only for the quest-giver (!/?) detection it still provides.
+    -- GetUnitQuestInfo for the quest-giver (!/?) detection it provides, but ONLY on
+    -- non-hostile units: a hostile mob is never a quest giver, and ClassicAPI was
+    -- flagging some with a bogus "!" (our native already covers hostile objectives).
     local questStatus, questID, talkToMe = ns.GetPlateQuestInfo(unit)
     if not questStatus and C_QuestLog and C_QuestLog.GetUnitQuestInfo then
-        local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
-        questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
+        local rk = UnitReaction("player", unit)
+        if rk and rk > 2 then
+            local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
+            questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
+        end
     end
 
     -- No quest data for this unit
@@ -5129,8 +5157,11 @@ local function UpdateLiteQuestIcon(nameplate, unit)
     -- Quest info: native detector first, ClassicAPI fallback (see UpdateQuestIcon).
     local questStatus, questID, talkToMe = ns.GetPlateQuestInfo(unit)
     if not questStatus and C_QuestLog and C_QuestLog.GetUnitQuestInfo then
-        local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
-        questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
+        local rk = UnitReaction("player", unit)
+        if rk and rk > 2 then
+            local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
+            questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
+        end
     end
 
     -- No quest data for this unit
