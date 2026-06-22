@@ -431,6 +431,23 @@ if not HAVE_NATIVE_ENGINE then
         return name ~= nil and name ~= "" and name ~= UNKNOWN and name ~= "Unknown"
     end
 
+    -- The health-bar COLOUR (reaction) lags the name by a frame or two on fresh /
+    -- login plates - the engine writes it C-side and our scrape reads nil until
+    -- then. Announcing on name-ready alone made Core classify friendly NPCs as
+    -- HOSTILE (full red plate instead of green name-only), and it never re-checked,
+    -- so they stayed wrong until /reload. So also wait for a known reaction before
+    -- announcing. Fall back after a few ticks so a plate whose colour never maps to
+    -- a known reaction key (odd server tint) still appears instead of staying
+    -- invisible. Reaction-ready is the friendly/hostile gate; name-ready is the
+    -- "don't render Unknown" gate above.
+    local REACTION_WAIT_TICKS = 5
+    local function PlateAnnounceReady(blizzFrame)
+        if not PlateDataReady(blizzFrame) then return false end
+        if PlateReaction(blizzFrame) ~= nil then return true end
+        blizzFrame._tpReactionWait = (blizzFrame._tpReactionWait or 0) + 1
+        return blizzFrame._tpReactionWait >= REACTION_WAIT_TICKS
+    end
+
     -- Scratch buffers reused across passes so each plate is scraped at most once
     -- per UpdateMatches call (instead of once per unmatched tracked unit).
     local candFrame, candName, candLvl, candCur, candMax = {}, {}, {}, {}, {}
@@ -1014,7 +1031,7 @@ if not HAVE_NATIVE_ENGINE then
         -- Only announce once the scraped name is ready. If not (first frame /
         -- login), the driver re-checks each tick and announces when it becomes
         -- available, so Core never renders a half-initialized "Unknown" plate.
-        if PlateDataReady(blizzFrame) then
+        if PlateAnnounceReady(blizzFrame) then
             blizzFrame._tpAnnounced = true
             FireAdded(token, blizzFrame)
         else
@@ -1030,6 +1047,14 @@ if not HAVE_NATIVE_ENGINE then
             FireRemoved(token, blizzFrame)
             blizzFrame._tpAnnounced = false
         end
+        -- Recycled plate must re-wait for the NEW occupant's reaction colour, not
+        -- inherit the previous mob's wait/announce state (see PlateAnnounceReady).
+        -- Drop the cached reaction too: keeping it would let a plate reused from a
+        -- hostile mob announce a friendly NPC as hostile (full red) on the stale
+        -- value before RefreshPlateScrape reads the new colour. RefreshPlateScrape
+        -- re-derives it from the live bar on re-acquire.
+        blizzFrame._tpReactionWait = nil
+        blizzFrame._tpReaction = nil
         blizzFrame._unit = nil
         -- Keep _tpToken + tokenToPlate[token] so the SAME token is reused when this
         -- pooled frame is shown again (see AcquirePlate). Visibility is gated by
@@ -1106,7 +1131,7 @@ if not HAVE_NATIVE_ENGINE then
             -- matched to its real unit when Core first renders it.
             for frame in pairs(managedPlates) do
                 if not frame._tpAnnounced and frame:IsShown()
-                   and PlateDataReady(frame) then
+                   and PlateAnnounceReady(frame) then
                     frame._tpAnnounced = true
                     FireAdded(frame._tpToken, frame)
                 end
