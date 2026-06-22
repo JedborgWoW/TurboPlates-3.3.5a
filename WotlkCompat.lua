@@ -173,17 +173,33 @@ if not HAVE_NATIVE_ENGINE then
         if blizzFrame._tpSourcesHooked then return end
         blizzFrame._tpSourcesHooked = true
 
+        -- Cache the value, then BLANK the Blizzard FontString. The engine re-shows
+        -- suppressed regions C-side (bypassing Hide / Show hooks), so a plain Hide
+        -- let the Blizzard name/level FLASH for ~0.1s on every (re-)show before the
+        -- throttled scan re-hid them. But the engine fills these via SetText (the
+        -- same call we hook to scrape), so emptying the text in the hook makes them
+        -- render nothing no matter when the engine shows them - and re-empties every
+        -- time the engine re-fills. The `txt ~= ""` guard stops the SetText("")
+        -- recursion; we scrape from the cached _tpName/_tpLevel, never the live text.
         if nameText then
             blizzFrame._tpName = nameText:GetText()
-            hooksecurefunc(nameText, "SetText", function(_, txt)
-                blizzFrame._tpName = txt
+            hooksecurefunc(nameText, "SetText", function(self, txt)
+                if txt and txt ~= "" then
+                    blizzFrame._tpName = txt
+                    self:SetText("")
+                end
             end)
+            nameText:SetText("")
         end
         if levelText then
             blizzFrame._tpLevel = tonumber(levelText:GetText())
-            hooksecurefunc(levelText, "SetText", function(_, txt)
-                blizzFrame._tpLevel = tonumber(txt)
+            hooksecurefunc(levelText, "SetText", function(self, txt)
+                if txt and txt ~= "" then
+                    blizzFrame._tpLevel = tonumber(txt)
+                    self:SetText("")
+                end
             end)
+            levelText:SetText("")
         end
         if healthBar and healthBar.GetValue then
             local cur = healthBar:GetValue()
