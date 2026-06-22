@@ -1221,12 +1221,14 @@ if not HAVE_NATIVE_ENGINE then
     end
 
     local visible = {}
+    local knownPlates = {}   -- every WorldFrame child ever confirmed a nameplate (the pool)
     local function ScanWorldFrame()
         wipe(visible)
         local kids = { WorldFrame:GetChildren() }
         for i = 1, #kids do
             local frame = kids[i]
             if IsNamePlate(frame) then
+                knownPlates[frame] = true   -- pooled frames are reused, never destroyed
                 visible[frame] = true
                 if not managedPlates[frame] then
                     AcquirePlate(frame)
@@ -1235,6 +1237,22 @@ if not HAVE_NATIVE_ENGINE then
         end
         for frame in pairs(managedPlates) do
             if not visible[frame] or not frame:IsShown() then
+                ReleasePlate(frame)
+            end
+        end
+    end
+
+    -- Per-frame, cheap (iterates the small persistent pool set, no allocation): act
+    -- on a pooled plate's show/hide the instant it happens. The engine shows/hides
+    -- pooled plates C-SIDE (bypassing Lua Show/Hide hooks), so otherwise a transition
+    -- was only caught on the 0.1s scan - long enough for a stale/partial plate (e.g.
+    -- just the level number, or the previous occupant's art) to flash before the real
+    -- one renders, and for our own plate to linger after the mob is gone.
+    local function ProcessPlateVisibility()
+        for frame in pairs(knownPlates) do
+            if frame:IsShown() then
+                if not managedPlates[frame] then AcquirePlate(frame) end
+            elseif managedPlates[frame] then
                 ReleasePlate(frame)
             end
         end
@@ -1252,6 +1270,9 @@ if not HAVE_NATIVE_ENGINE then
             lastChildCount = n
             ScanWorldFrame()
         end
+        -- Every frame: catch C-side show/hide of known pooled plates immediately,
+        -- so appearance/disappearance is ~1 frame, not up to a throttled tick.
+        ProcessPlateVisibility()
         matchElapsed = matchElapsed + elapsed
         if matchElapsed >= 0.1 * (ns.c_throttleMultiplier or 1) then
             matchElapsed = 0
