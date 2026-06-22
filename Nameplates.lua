@@ -4872,9 +4872,15 @@ local function UpdateQuestIcon(unit)
         return
     end
 
-    -- Get quest info for this unit
-    -- C_QuestLog.GetUnitQuestInfo returns: questStatus, questID, talkToMe
-    local questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(unit)
+    -- Get quest info for this unit.
+    -- C_QuestLog.GetUnitQuestInfo returns: questStatus, questID, talkToMe.
+    -- On 3.3.5a this API (from ClassicAPI) resolves the unit through the stock
+    -- global Unit*/tooltip, which DON'T understand our synthetic plate tokens - so
+    -- it returns nothing for an unbound plate. When the plate is bound to a real
+    -- unit (target/focus/mouseover) pass THAT instead, so at least the mob you're
+    -- looking at / fighting reliably gets its quest icon.
+    local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
+    local questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
 
     -- No quest data for this unit
     if Quest.isNilOrEmpty(talkToMe) and not questStatus then
@@ -5014,8 +5020,9 @@ local function UpdateLiteQuestIcon(nameplate, unit)
         return
     end
 
-    -- Get quest info for this unit
-    local questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(unit)
+    -- Get quest info for this unit (real unit when bound - see UpdateQuestIcon).
+    local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
+    local questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
 
     -- No quest data for this unit
     if Quest.isNilOrEmpty(talkToMe) and not questStatus then
