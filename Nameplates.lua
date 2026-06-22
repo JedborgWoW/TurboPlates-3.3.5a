@@ -4847,6 +4847,124 @@ local Quest = {
     end,
 }
 
+-- =============================================================================
+-- NATIVE QUEST-OBJECTIVE DETECTION (self-contained, independent of ClassicAPI)
+-- 3.3.5a exposes per-unit quest data poorly, so we use two complementary sources:
+--   1) TOOLTIP scan of the plate's REAL unit (target/focus/mouseover, or the real
+--      token on a native engine). The game tooltip lists a quest mob's objective
+--      progress ("Purifying Earth: 1/2") even for use-item / interact quests where
+--      the mob name never appears in the quest text - the only way to catch those.
+--   2) QUEST-LOG objective name match against the plate's scraped name, for plates
+--      with no real unit (unbound): catches kill / collect-from quests passively
+--      on every visible mob.
+-- ns.GetPlateQuestInfo returns the shape consumers expect from GetUnitQuestInfo:
+-- questStatus ("objective" when an in-progress objective is detected), questID,
+-- talkToMe (the latter two nil - we detect objectives, not quest-givers).
+-- Wrapped in a do-block so its state stays out of the main chunk's local pool
+-- (Lua 5.1 caps a function at 200 locals); the ns.* fns keep it via upvalues.
+-- =============================================================================
+do
+local GetNumQuestLeaderBoards = GetNumQuestLeaderBoards
+local GetQuestLogLeaderBoard = GetQuestLogLeaderBoard
+local GetNumQuestLogEntries = GetNumQuestLogEntries
+
+-- (1) Hidden scanning tooltip. True if the unit's tooltip shows an IN-PROGRESS
+-- objective line (x/y with x < y) -> we still need this mob.
+local questScanTip
+local function UnitTooltipHasQuestObjective(realUnit)
+    if not realUnit then return false end
+    if not questScanTip then
+        questScanTip = CreateFrame("GameTooltip", "TurboPlatesQuestScanTip", UIParent, "GameTooltipTemplate")
+    end
+    questScanTip:SetOwner(UIParent, "ANCHOR_NONE")  -- ANCHOR_NONE + Hide() keeps it invisible
+    questScanTip:ClearLines()
+    -- pcall: SetUnit on an unexpected token shouldn't error out the caller.
+    if not pcall(questScanTip.SetUnit, questScanTip, realUnit) then
+        questScanTip:Hide()
+        return false
+    end
+    local found = false
+    for i = 2, (questScanTip:NumLines() or 0) do  -- line 1 is the unit name
+        local fs = _G["TurboPlatesQuestScanTipTextLeft" .. i]
+        local text = fs and fs:GetText()
+        if text then
+            local cur, total = strmatch(text, "(%d+)%s*/%s*(%d+)")
+            if cur then
+                cur, total = tonumber(cur), tonumber(total)
+                if cur and total and total > 0 and cur < total then
+                    found = true
+                    break
+                end
+            end
+        end
+    end
+    questScanTip:Hide()
+    return found
+end
+
+-- (2) Quest-log objective name cache. Stores the text of every in-progress
+-- objective; a plate is a quest target if its name is a substring of one (locale-
+-- independent: the mob name appears verbatim in "MobName slain: 3/10"). Rebuilt
+-- lazily after QUEST_LOG_UPDATE.
+local questObjectiveTexts = {}
+local questNameMatchCache = {}
+local questCacheDirty = true
+ns.InvalidateQuestCache = function() questCacheDirty = true end
+
+local function RebuildQuestObjectiveCache()
+    questCacheDirty = false
+    wipe(questObjectiveTexts)
+    wipe(questNameMatchCache)
+    local numEntries = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
+    for i = 1, numEntries do
+        local title, _, _, _, isHeader, _, isComplete = GetQuestLogTitle(i)
+        if title and not isHeader and not isComplete then
+            local numObj = (GetNumQuestLeaderBoards and GetNumQuestLeaderBoards(i)) or 0
+            for o = 1, numObj do
+                local text, _, finished = GetQuestLogLeaderBoard(o, i)
+                if text and not finished then
+                    questObjectiveTexts[#questObjectiveTexts + 1] = text
+                end
+            end
+        end
+    end
+end
+
+local function PlateNameMatchesQuest(plateName)
+    if not plateName or plateName == "" then return false end
+    if questCacheDirty then RebuildQuestObjectiveCache() end
+    local cached = questNameMatchCache[plateName]
+    if cached ~= nil then return cached end
+    local result = false
+    for i = 1, #questObjectiveTexts do
+        if questObjectiveTexts[i]:find(plateName, 1, true) then
+            result = true
+            break
+        end
+    end
+    questNameMatchCache[plateName] = result
+    return result
+end
+
+function ns.GetPlateQuestInfo(plateUnit)
+    -- Real unit behind the plate: the bound unit on compat, the real token on a
+    -- native engine, nil for an unbound compat plate.
+    local realUnit
+    if ns.GetPlateRealUnit then
+        realUnit = ns.GetPlateRealUnit(plateUnit)
+    else
+        realUnit = plateUnit
+    end
+    if realUnit and UnitTooltipHasQuestObjective(realUnit) then
+        return "objective"
+    end
+    if PlateNameMatchesQuest(UnitName(plateUnit)) then
+        return "objective"
+    end
+    return nil
+end
+end  -- native quest-detection do-block
+
 -- Update quest objective icon for a unit (full plates)
 -- Uses C_QuestLog.GetUnitQuestInfo and QuestUtil to get appropriate icon
 -- Logic matches FrameXML/CompactUnitFrame.lua:UpdateQuestIcon()
@@ -4866,21 +4984,15 @@ local function UpdateQuestIcon(unit)
         return
     end
 
-    -- Check if API exists (recheck each call in case C_QuestLog loads late)
-    if not (C_QuestLog and C_QuestLog.GetUnitQuestInfo) then
-        if myPlate.questIcon then myPlate.questIcon:Hide() end
-        return
+    -- Quest info: prefer our native detector (no ClassicAPI needed; catches
+    -- interact-quests via a tooltip scan of the bound unit AND kill/collect quests
+    -- via quest-log name match on any plate). Fall back to ClassicAPI's
+    -- GetUnitQuestInfo only for the quest-giver (!/?) detection it still provides.
+    local questStatus, questID, talkToMe = ns.GetPlateQuestInfo(unit)
+    if not questStatus and C_QuestLog and C_QuestLog.GetUnitQuestInfo then
+        local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
+        questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
     end
-
-    -- Get quest info for this unit.
-    -- C_QuestLog.GetUnitQuestInfo returns: questStatus, questID, talkToMe.
-    -- On 3.3.5a this API (from ClassicAPI) resolves the unit through the stock
-    -- global Unit*/tooltip, which DON'T understand our synthetic plate tokens - so
-    -- it returns nothing for an unbound plate. When the plate is bound to a real
-    -- unit (target/focus/mouseover) pass THAT instead, so at least the mob you're
-    -- looking at / fighting reliably gets its quest icon.
-    local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
-    local questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
 
     -- No quest data for this unit
     if Quest.isNilOrEmpty(talkToMe) and not questStatus then
@@ -5014,15 +5126,12 @@ local function UpdateLiteQuestIcon(nameplate, unit)
         return
     end
 
-    -- Check if API exists (recheck each call in case C_QuestLog loads late)
-    if not (C_QuestLog and C_QuestLog.GetUnitQuestInfo) then
-        if nameplate.liteQuestIcon then nameplate.liteQuestIcon:Hide() end
-        return
+    -- Quest info: native detector first, ClassicAPI fallback (see UpdateQuestIcon).
+    local questStatus, questID, talkToMe = ns.GetPlateQuestInfo(unit)
+    if not questStatus and C_QuestLog and C_QuestLog.GetUnitQuestInfo then
+        local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
+        questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
     end
-
-    -- Get quest info for this unit (real unit when bound - see UpdateQuestIcon).
-    local questUnit = (ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)) or unit
-    local questStatus, questID, talkToMe = C_QuestLog.GetUnitQuestInfo(questUnit)
 
     -- No quest data for this unit
     if Quest.isNilOrEmpty(talkToMe) and not questStatus then
@@ -5994,6 +6103,9 @@ end
 
 local function ProcessQuestUpdate()
     pendingTimers.quest = nil
+    -- Quest log changed: drop the cached objective texts so the native detector
+    -- rebuilds them on the next lookup.
+    if ns.InvalidateQuestCache then ns.InvalidateQuestCache() end
     -- Only update if quest icons are actually enabled
     if ns.c_questIconsEnabled then
         UpdateAllQuestIcons()
