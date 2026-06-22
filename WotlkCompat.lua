@@ -1262,7 +1262,19 @@ if not HAVE_NATIVE_ENGINE then
     driver:RegisterEvent("PLAYER_FOCUS_CHANGED")
     driver:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
     driver:RegisterEvent("UNIT_TARGET")
+    driver:RegisterEvent("CVAR_UPDATE")
     driver:SetScript("OnEvent", function(_, event, arg1)
+        if event == "CVAR_UPDATE" then
+            -- Toggling friendly/enemy nameplates (nameplateShowFriends/Enemies) is a
+            -- CVar change that bulk-shows the plates C-side, bypassing our per-frame
+            -- Show hook - so they'd only be re-acquired on the throttled scan (~0.1s),
+            -- leaving a brief gap where the plate is gone. Rescan now (synchronous
+            -- show) AND force a full scan next frame (async show) to close the gap.
+            ScanWorldFrame()
+            matchElapsed = 1e9
+            UpdateMatches()
+            return
+        end
         if event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE"
            or event == "PLAYER_ENTERING_WORLD" then
             RebuildTrackedUnits()
