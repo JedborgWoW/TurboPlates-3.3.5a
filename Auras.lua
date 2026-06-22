@@ -37,15 +37,24 @@ local C_Hook = C_Hook
 -- "know" (target/focus/mouseover/group/arena). So debuffs YOU apply to plates
 -- with no token - e.g. Death Knight diseases that Pestilence spreads to nearby
 -- mobs - can't be read and never show. To cover that, mirror the player's (and
--- pet's) applied debuffs from the combat log, keyed by destination NAME, and
--- merge them onto unbound plates in UpdateAuras. Durations aren't in the combat
--- log, so they're LEARNED from real UnitAura reads on bound units (auto-adapts
--- to talents like Epidemic); until learned, the icon shows without a timer.
--- Limitation: unbound plates are name-only, so mobs sharing a name share the
--- display. Native engines skip all of this (they read auras for real).
-local cleuAuras = {}        -- cleuAuras[destName][spellID] = { name, applied, stacks }
+-- pet's) applied debuffs from the combat log and merge them onto unbound plates
+-- in UpdateAuras. Durations aren't in the combat log, so they're LEARNED from
+-- real UnitAura reads on bound units (auto-adapts to talents like Epidemic);
+-- until learned, the icon shows without a timer.
+--
+-- Tracked per destination GUID (not name) so we can tell individuals apart. The
+-- display is still name-only (unbound plates have no GUID), but we EXCLUDE GUIDs
+-- that are currently bound (target/focus/mouseover): their auras already show on
+-- their own plate via UnitAura, so without this a single-target DoT on your
+-- target bleeds onto same-named neighbours that don't actually have it. A real
+-- Pestilence spread still shows, because the neighbour got its own application.
+-- Native engines skip all of this (they read auras for real).
+local cleuByGUID = {}       -- [destGUID] = { name=, spells = { [spellID]={name,applied,stacks} } }
+local nameIndex = {}        -- [destName] = { [destGUID]=true }  (reverse lookup)
 local durationBySpell = {}  -- spellID -> duration, learned from UnitAura
 local playerGUID, petGUID
+local exclScratch = {}      -- reused: bound GUIDs to skip when merging
+local seenScratch = {}      -- reused: spellIDs already added (dedup across GUIDs)
 
 -- =============================================================================
 -- CREATE TEXTURE BORDER UTILITY (uses shared system from Nameplates.lua)
@@ -981,11 +990,18 @@ do
         end
 
         -- Whose applied debuffs to mirror: the player and the player's pet.
+        -- Also wipe the cache on leaving combat - DoTs are gone by then, and it
+        -- bounds memory / staleness.
         local guidFrame = CreateFrame("Frame")
         guidFrame:RegisterEvent("PLAYER_LOGIN")
         guidFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
         guidFrame:RegisterEvent("UNIT_PET")
+        guidFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         guidFrame:SetScript("OnEvent", function(_, ev, unit)
+            if ev == "PLAYER_REGEN_ENABLED" then
+                wipe(cleuByGUID) wipe(nameIndex)
+                return
+            end
             if ev == "UNIT_PET" and unit ~= "player" then return end
             playerGUID = UnitGUID("player")
             petGUID = UnitExists("pet") and UnitGUID("pet") or nil
@@ -994,7 +1010,7 @@ do
         -- 3.3.5a delivers the CLEU payload as event args (after self,event):
         -- timestamp, subevent, srcGUID, srcName, srcFlags, dstGUID, dstName,
         -- dstFlags, then spell args (spellId, spellName, spellSchool, auraType,
-        -- [amount]).
+        -- [amount]). Track per destGUID so individuals stay distinct.
         local APPLY = {
             SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
             SPELL_AURA_APPLIED_DOSE = true, SPELL_AURA_REMOVED_DOSE = true,
@@ -1002,25 +1018,39 @@ do
         local clog = CreateFrame("Frame")
         clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
         clog:SetScript("OnEvent", function(_, _, _, subevent, srcGUID, _, _,
-                _, destName, _, spellId, spellName, _, auraType, amount)
+                destGUID, destName, _, spellId, spellName, _, auraType, amount)
             if srcGUID ~= playerGUID and srcGUID ~= petGUID then return end
-            if auraType ~= "DEBUFF" or not destName or not spellId then return end
+            if auraType ~= "DEBUFF" or not destGUID or not destName or not spellId then return end
             if APPLY[subevent] then
-                local byName = cleuAuras[destName]
-                if not byName then byName = {} cleuAuras[destName] = byName end
-                local e = byName[spellId]
-                if not e then e = {} byName[spellId] = e end
-                e.name = spellName
-                e.applied = GetTime()
+                local g = cleuByGUID[destGUID]
+                if not g then
+                    g = { name = destName, spells = {} }
+                    cleuByGUID[destGUID] = g
+                    local idx = nameIndex[destName]
+                    if not idx then idx = {} nameIndex[destName] = idx end
+                    idx[destGUID] = true
+                end
+                local s = g.spells[spellId]
+                if not s then s = {} g.spells[spellId] = s end
+                s.name = spellName
+                s.applied = GetTime()
                 if subevent == "SPELL_AURA_APPLIED_DOSE"
                    or subevent == "SPELL_AURA_REMOVED_DOSE" then
-                    e.stacks = amount
+                    s.stacks = amount
                 end
                 MarkNameDirty(destName)
             elseif subevent == "SPELL_AURA_REMOVED" then
-                local byName = cleuAuras[destName]
-                if byName and byName[spellId] then
-                    byName[spellId] = nil
+                local g = cleuByGUID[destGUID]
+                if g and g.spells[spellId] then
+                    g.spells[spellId] = nil
+                    if not next(g.spells) then
+                        cleuByGUID[destGUID] = nil
+                        local idx = nameIndex[g.name]
+                        if idx then
+                            idx[destGUID] = nil
+                            if not next(idx) then nameIndex[g.name] = nil end
+                        end
+                    end
                     MarkNameDirty(destName)
                 end
             end
@@ -1030,37 +1060,61 @@ end
 
 -- Merge combat-log-tracked player debuffs onto an UNBOUND plate (one with no
 -- real unit token, so UnitAura returned nothing). Bound plates are left to
--- UnitAura, which is authoritative. Entries past their learned duration are
--- pruned; entries whose duration isn't known yet show as a timerless icon.
+-- UnitAura, which is authoritative. We iterate the GUIDs known for this plate's
+-- NAME but skip any GUID currently bound to a plate (target/focus/mouseover):
+-- those auras already show on their own plate, and skipping them stops a
+-- single-target DoT on your target from bleeding onto same-named neighbours.
+-- Durations come from the learned cache; unknown -> timerless icon, with a 30s
+-- safety cap so a missed SPELL_AURA_REMOVED can't leave a stale icon forever.
 local function MergeTrackedDebuffs(unit, collector)
     if not ns.IS_WOTLK_COMPAT then return end
     if ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit) then return end  -- bound
     local name = UnitName(unit)
-    local byName = name and cleuAuras[name]
-    if not byName then return end
+    local idx = name and nameIndex[name]
+    if not idx then return end
+
+    local excl = exclScratch
+    wipe(excl)
+    local tg = UnitGUID("target");    if tg then excl[tg] = true end
+    local fg = UnitGUID("focus");     if fg then excl[fg] = true end
+    local mg = UnitGUID("mouseover"); if mg then excl[mg] = true end
+
+    local seen = seenScratch
+    wipe(seen)
     local now = GetTime()
-    for spellID, e in pairs(byName) do
-        local dur = durationBySpell[spellID]
-        -- Prune when past the learned duration, or - if the duration was never
-        -- learned (we never saw this spell on a bound unit) - after a safety cap
-        -- so a missed SPELL_AURA_REMOVED can't leave a stale icon forever.
-        if (dur and e.applied + dur <= now) or (not dur and now - e.applied > 30) then
-            byName[spellID] = nil
-        elseif not (ns.AuraBlacklist and rawget(ns.AuraBlacklist, spellID)) then
-            local aura = AcquireAuraData()
-            aura.name = e.name
-            aura.icon = GetCachedIcon(spellID, nil)
-            aura.count = e.stacks or 0
-            aura.debuffType = nil
-            aura.duration = dur or 0
-            aura.expires = dur and (e.applied + dur) or 0
-            aura.canStealOrPurge = false
-            aura.spellID = spellID
-            aura.isDebuff = true
-            aura.timeLeft = aura.expires > 0 and (aura.expires - now) or 0
-            tinsert(collector, aura)
+    for guid in pairs(idx) do
+        local g = (not excl[guid]) and cleuByGUID[guid]
+        if g then
+            for spellID, s in pairs(g.spells) do
+                local dur = durationBySpell[spellID]
+                if (dur and s.applied + dur <= now) or (not dur and now - s.applied > 30) then
+                    g.spells[spellID] = nil  -- expired / safety cap
+                elseif not seen[spellID]
+                       and not (ns.AuraBlacklist and rawget(ns.AuraBlacklist, spellID)) then
+                    seen[spellID] = true  -- dedup: same spell across several neighbours
+                    local aura = AcquireAuraData()
+                    aura.name = s.name
+                    aura.icon = GetCachedIcon(spellID, nil)
+                    aura.count = s.stacks or 0
+                    aura.debuffType = nil
+                    aura.duration = dur or 0
+                    aura.expires = dur and (s.applied + dur) or 0
+                    aura.canStealOrPurge = false
+                    aura.spellID = spellID
+                    aura.isDebuff = true
+                    aura.timeLeft = aura.expires > 0 and (aura.expires - now) or 0
+                    tinsert(collector, aura)
+                end
+            end
+            if not next(g.spells) then  -- all pruned: drop the GUID
+                cleuByGUID[guid] = nil
+                idx[guid] = nil
+            end
+        elseif not excl[guid] then
+            idx[guid] = nil  -- stale index entry (GUID no longer tracked)
         end
     end
+    if not next(idx) then nameIndex[name] = nil end
 end
 
 -- =============================================================================
