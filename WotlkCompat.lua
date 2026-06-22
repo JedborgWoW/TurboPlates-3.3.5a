@@ -448,6 +448,17 @@ if not HAVE_NATIVE_ENGINE then
         return blizzFrame._tpReactionWait >= REACTION_WAIT_TICKS
     end
 
+    -- Core decides friendly (lite green name-only) vs hostile (full plate) ONCE at
+    -- OnNamePlateAdded and never re-checks. The reaction colour can still be
+    -- wrong/unknown at announce (engine writes it C-side a frame or two later, and
+    -- the announce fallback may fire), which left friendly NPCs stuck as full red
+    -- plates until /reload. We watch the friendly verdict after announce and re-fire
+    -- OnNamePlateAdded when it flips, which switches the plate lite<->full.
+    local function PlateIsFriendly(blizzFrame)
+        local rk = PlateReaction(blizzFrame)
+        return rk == "friendly" or rk == "friendlyPlayer"
+    end
+
     -- Scratch buffers reused across passes so each plate is scraped at most once
     -- per UpdateMatches call (instead of once per unmatched tracked unit).
     local candFrame, candName, candLvl, candCur, candMax = {}, {}, {}, {}, {}
@@ -963,6 +974,20 @@ if not HAVE_NATIVE_ENGINE then
                     -- (so the name/level SetText hooks we scrape from keep firing)
                     -- and reliably hidden.
                     SuppressRegion(child)
+                elseif child == healthBar then
+                    -- The health bar is our REACTION-COLOUR source. Reparenting it
+                    -- off the plate and clearing its StatusBar texture (as the else
+                    -- branch does) froze GetStatusBarColor at the value it happened
+                    -- to hold when we hid it: the C engine writes the bar by pointer
+                    -- IN PLACE, but with no texture there is no vertex colour left to
+                    -- read. So a friendly NPC whose reaction colour the engine only
+                    -- set a frame or two AFTER we hid the bar stayed read as hostile
+                    -- (full red plate) until /reload. Keep it parented WITH its
+                    -- texture and just hide it (alpha 0 + Hide + Show-hook, same as
+                    -- the FontStrings) so the colour stays live for PlateReaction /
+                    -- RefreshPlateScrape. It's invisible while hidden regardless.
+                    child:SetAlpha(0)
+                    SuppressRegion(child)
                 else
                     child:SetParent(blizzHiddenParent)
                     child:SetAlpha(0)
@@ -1033,6 +1058,7 @@ if not HAVE_NATIVE_ENGINE then
         -- available, so Core never renders a half-initialized "Unknown" plate.
         if PlateAnnounceReady(blizzFrame) then
             blizzFrame._tpAnnounced = true
+            blizzFrame._tpAnnouncedFriendly = PlateIsFriendly(blizzFrame)
             FireAdded(token, blizzFrame)
         else
             blizzFrame._tpAnnounced = false
@@ -1048,13 +1074,12 @@ if not HAVE_NATIVE_ENGINE then
             blizzFrame._tpAnnounced = false
         end
         -- Recycled plate must re-wait for the NEW occupant's reaction colour, not
-        -- inherit the previous mob's wait/announce state (see PlateAnnounceReady).
-        -- Drop the cached reaction too: keeping it would let a plate reused from a
-        -- hostile mob announce a friendly NPC as hostile (full red) on the stale
-        -- value before RefreshPlateScrape reads the new colour. RefreshPlateScrape
-        -- re-derives it from the live bar on re-acquire.
+        -- inherit the previous mob's announce-wait state (see PlateAnnounceReady).
+        -- Do NOT clear _tpReaction here: RefreshPlateScrape keeps it live, and
+        -- clearing it opened a nil window on re-show (toggle friendly plates off/on,
+        -- pan away/back) that the fallback then announced as HOSTILE. A genuinely
+        -- changed reaction is caught by the re-classify pass in the driver tick.
         blizzFrame._tpReactionWait = nil
-        blizzFrame._tpReaction = nil
         blizzFrame._unit = nil
         -- Keep _tpToken + tokenToPlate[token] so the SAME token is reused when this
         -- pooled frame is shown again (see AcquirePlate). Visibility is gated by
@@ -1130,10 +1155,24 @@ if not HAVE_NATIVE_ENGINE then
             -- functions. UpdateMatches ran first, so a now-ready plate is already
             -- matched to its real unit when Core first renders it.
             for frame in pairs(managedPlates) do
-                if not frame._tpAnnounced and frame:IsShown()
-                   and PlateAnnounceReady(frame) then
-                    frame._tpAnnounced = true
-                    FireAdded(frame._tpToken, frame)
+                if frame:IsShown() then
+                    if not frame._tpAnnounced then
+                        if PlateAnnounceReady(frame) then
+                            frame._tpAnnounced = true
+                            frame._tpAnnouncedFriendly = PlateIsFriendly(frame)
+                            FireAdded(frame._tpToken, frame)
+                        end
+                    else
+                        -- Reaction settled to a different friendly verdict than at
+                        -- announce: re-classify (full <-> lite). _tpReaction is sticky
+                        -- once known, so this fires at most once per plate and never
+                        -- thrashes.
+                        local fr = PlateIsFriendly(frame)
+                        if fr ~= frame._tpAnnouncedFriendly then
+                            frame._tpAnnouncedFriendly = fr
+                            FireAdded(frame._tpToken, frame)
+                        end
+                    end
                 end
             end
         end
