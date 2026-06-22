@@ -189,6 +189,18 @@ if not HAVE_NATIVE_ENGINE then
                     self:SetText("")
                 end
             end)
+            -- The engine may set name/level via SetFormattedText, not SetText (that's
+            -- why blanking only SetText left the LEVEL number still flashing). Catch
+            -- both: after SetFormattedText, read the result, cache it, and blank.
+            if nameText.SetFormattedText then
+                hooksecurefunc(nameText, "SetFormattedText", function(self)
+                    local cur = self:GetText()
+                    if cur and cur ~= "" then
+                        blizzFrame._tpName = cur
+                        self:SetText("")
+                    end
+                end)
+            end
             nameText:SetText("")
         end
         if levelText then
@@ -199,6 +211,15 @@ if not HAVE_NATIVE_ENGINE then
                     self:SetText("")
                 end
             end)
+            if levelText.SetFormattedText then
+                hooksecurefunc(levelText, "SetFormattedText", function(self)
+                    local cur = self:GetText()
+                    if cur and cur ~= "" then
+                        blizzFrame._tpLevel = tonumber(cur)
+                        self:SetText("")
+                    end
+                end)
+            end
             levelText:SetText("")
         end
         if healthBar and healthBar.GetValue then
