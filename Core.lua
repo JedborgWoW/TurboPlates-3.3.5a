@@ -1288,6 +1288,15 @@ OnNamePlateRemoved = function(_, unit, nameplate)
             if nameplate.liteContainer.liteHealerIcon then
                 nameplate.liteContainer.liteHealerIcon:Hide()
             end
+            -- Blank+hide the lite name/level so a recycled friendly plate can't flash
+            -- the previous occupant's text before it's repopulated.
+            if nameplate.liteContainer.liteNameText then
+                nameplate.liteContainer.liteNameText:SetText("")
+            end
+            if nameplate.liteContainer.liteLevelText then
+                nameplate.liteContainer.liteLevelText:SetText("")
+                nameplate.liteContainer.liteLevelText:Hide()
+            end
         end
         -- Hide lite TurboDebuff
         if ns.HideLiteTurboDebuff then
@@ -1370,6 +1379,14 @@ OnNamePlateRemoved = function(_, unit, nameplate)
             -- Clear arena number from name text (prevent stale arena numbers on recycled plates)
             if nameplate.myPlate.nameText then
                 nameplate.myPlate.nameText:SetText("")
+            end
+            -- Clear the level text too (it was NOT cleared like the name). OnNamePlateAdded
+            -- shows myPlate BEFORE FullPlateUpdate repopulates it, so a recycled plate would
+            -- briefly show the previous occupant's level number (indistinguishable from the
+            -- new one in a same-level zone) - a "level flashes before the real plate" blink.
+            if nameplate.myPlate.levelText then
+                nameplate.myPlate.levelText:SetText("")
+                nameplate.myPlate.levelText:Hide()
             end
             nameplate.myPlate:Hide()
             -- Reset personal plate state (prevents flash of power bar on recycled plates)
