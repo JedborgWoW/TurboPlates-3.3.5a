@@ -189,6 +189,11 @@ if not HAVE_NATIVE_ENGINE then
             local cur = healthBar:GetValue()
             local _, max = healthBar:GetMinMaxValues()
             blizzFrame._tpHP, blizzFrame._tpHPMax = cur, max
+            -- Remember the bar's texture path: we DROP it once the reaction colour
+            -- is captured (RefreshPlateScrape) so the Blizzard bar can't leak into
+            -- view, and re-add it for a recycled plate's new occupant (AcquirePlate).
+            local _tex = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture()
+            blizzFrame._tpHealthTex = (_tex and _tex.GetTexture) and _tex:GetTexture() or nil
             local r, g, b = healthBar:GetStatusBarColor()
             blizzFrame._tpReaction = ColorToReactionKey(r, g, b)
 
@@ -426,7 +431,34 @@ if not HAVE_NATIVE_ENGINE then
             end
             if hb.GetStatusBarColor then
                 local key = ColorToReactionKey(hb:GetStatusBarColor())
-                if key then frame._tpReaction = key end
+                if key then
+                    if key == frame._tpReaction then
+                        frame._tpReactionStable = (frame._tpReactionStable or 0) + 1
+                    else
+                        frame._tpReaction = key
+                        frame._tpReactionStable = 1
+                    end
+                    -- Once the reaction has held steady for a couple of reads, drop
+                    -- the bar texture: the engine re-shows suppressed children C-side
+                    -- (see the name/level re-hide above), bypassing our Hide hook, so
+                    -- a kept-but-hidden bar leaked the Blizzard health bar into view;
+                    -- a TEXTURELESS bar can't render at all. GetValue still works
+                    -- (health scrape), only colour freezes (reaction is stable;
+                    -- recycle re-arms the texture in AcquirePlate). The 2-read wait
+                    -- stops a transient/too-early colour from freezing a WRONG value.
+                    if frame._tpHealthTexLive and frame._tpReactionStable >= 2
+                       and hb.SetStatusBarTexture then
+                        hb:SetStatusBarTexture(nil)
+                        frame._tpHealthTexLive = false
+                    end
+                end
+            end
+            -- While still reading the reaction (texture present) re-hide the bar each
+            -- tick - the engine re-shows it C-side, bypassing the Show hook, same as
+            -- the name/level FontStrings above.
+            if frame._tpHealthTexLive then
+                if hb.GetAlpha and hb:GetAlpha() ~= 0 then hb:SetAlpha(0) end
+                if hb.IsShown and hb:IsShown() then hb:Hide() end
             end
         end
     end
@@ -995,10 +1027,14 @@ if not HAVE_NATIVE_ENGINE then
                     -- set a frame or two AFTER we hid the bar stayed read as hostile
                     -- (full red plate) until /reload. Keep it parented WITH its
                     -- texture and just hide it (alpha 0 + Hide + Show-hook, same as
-                    -- the FontStrings) so the colour stays live for PlateReaction /
-                    -- RefreshPlateScrape. It's invisible while hidden regardless.
+                    -- the FontStrings) so the colour stays live for PlateReaction.
+                    -- RefreshPlateScrape then DROPS the texture once the reaction is
+                    -- captured: the engine re-shows hidden children C-side (bypassing
+                    -- the Show hook), so only a textureless bar hides reliably.
+                    -- _tpHealthTexLive marks this brief readable window.
                     child:SetAlpha(0)
                     SuppressRegion(child)
+                    blizzFrame._tpHealthTexLive = true
                 else
                     child:SetParent(blizzHiddenParent)
                     child:SetAlpha(0)
@@ -1046,6 +1082,17 @@ if not HAVE_NATIVE_ENGINE then
         -- New occupant: allow exactly one level-text refresh on its first health
         -- tick (see the OnValueChanged hook), in case the level was stale at announce.
         blizzFrame._tpLevelRefreshed = nil
+        -- Re-arm reaction reading for the (possibly new) occupant: a recycled plate
+        -- had its bar texture dropped after the previous mob's reaction was captured,
+        -- so restore it (then RefreshPlateScrape re-captures and drops it again). On
+        -- first acquire _tpHealthBar is still nil here; HideBlizzPlateRegions arms it.
+        local rearmHB = blizzFrame._tpHealthBar
+        if rearmHB and rearmHB.SetStatusBarTexture and blizzFrame._tpHealthTex
+           and not blizzFrame._tpHealthTexLive then
+            rearmHB:SetStatusBarTexture(blizzFrame._tpHealthTex)
+            blizzFrame._tpHealthTexLive = true
+            blizzFrame._tpReactionStable = nil  -- re-stabilise for the new occupant
+        end
 
         CapturePlateRefs(blizzFrame)
         HideBlizzPlateRegions(blizzFrame)
