@@ -4418,28 +4418,35 @@ local function UpdateTarget()
 
     -- Reset scale and glow on previous target
     if ns.currentTargetPlate then
-        -- Verify plate still belongs to our tracked target (not recycled)
-        local prevUnit = ns.currentTargetPlate.unit
-        local plateGUID = prevUnit and UnitGUID(prevUnit)
-        local stillValid = plateGUID and plateGUID == ns.currentTargetGUID
+        local prevPlate = ns.currentTargetPlate
+        local prevUnit = prevPlate.unit
 
         -- Hide combo points on previous target
-        if ns.currentTargetPlate.cps then
-            for i = 1, #ns.currentTargetPlate.cps do
-                ns.currentTargetPlate.cps[i]:Hide()
+        if prevPlate.cps then
+            for i = 1, #prevPlate.cps do
+                prevPlate.cps[i]:Hide()
             end
         end
-        UpdateTargetGlow(ns.currentTargetPlate, false)
+        UpdateTargetGlow(prevPlate, false)
 
-        -- Only reset scale if plate wasn't recycled (OnNamePlateRemoved handles recycled plates)
-        if stillValid then
-            if UnitIsPet(prevUnit) then
-                ns.currentTargetPlate:SetScale(ns.c_scale * ns.c_petScale)
-            elseif UnitIsFriend("player", prevUnit) then
-                ns.currentTargetPlate:SetScale(ns.c_scale * ns.c_friendlyScale)
+        -- Reset the still-visible previous target back to its normal scale. This
+        -- must NOT be gated on UnitGUID(token)==currentTargetGUID: on stock 3.3.5a
+        -- PLAYER_TARGET_CHANGED releases the plate's "target" match (compat tracker)
+        -- before this handler runs, so the token resolves to its synthetic GUID and
+        -- that check failed intermittently - leaving the old plate stuck at target
+        -- scale ("a nameplate stays enlarged, bigger than the others"). A genuinely
+        -- recycled plate would already have cleared currentTargetPlate via
+        -- OnNamePlateRemoved, so reaching here means the plate is still live. Read
+        -- the plate's own cached nature (isFriendly), not the now-unbound token.
+        if not prevPlate.isPlayer then
+            if prevUnit and UnitIsPet(prevUnit) then
+                prevPlate:SetScale(ns.c_scale * ns.c_petScale)
+            elseif prevPlate.isFriendly then
+                prevPlate:SetScale(ns.c_scale * ns.c_friendlyScale)
             else
-                ns.currentTargetPlate:SetScale(ns.c_scale)
+                prevPlate:SetScale(ns.c_scale)
             end
+            prevPlate._lastScale = nil
         end
     end
     ns.currentTargetPlate = nil
