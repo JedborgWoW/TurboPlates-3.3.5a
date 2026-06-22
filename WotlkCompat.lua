@@ -1082,6 +1082,22 @@ if not HAVE_NATIVE_ENGINE then
         -- New occupant: allow exactly one level-text refresh on its first health
         -- tick (see the OnValueChanged hook), in case the level was stale at announce.
         blizzFrame._tpLevelRefreshed = nil
+        -- Pooled plates are hidden/re-shown without a WorldFrame child-count change,
+        -- so a re-show is otherwise only noticed on the throttled scan (~0.1s) - long
+        -- enough that the Blizzard name/level/bar flash at the Blizzard position
+        -- before we re-hide and render our own. The FRAME's Show IS hookable (unlike
+        -- the C-side region shows), so react to it immediately: re-acquire a released
+        -- plate (suppress + announce now) or just re-hide a still-managed one.
+        if not blizzFrame._tpShowHooked then
+            blizzFrame._tpShowHooked = true
+            hooksecurefunc(blizzFrame, "Show", function(self)
+                if managedPlates[self] then
+                    RefreshPlateScrape(self)
+                elseif IsNamePlate(self) then
+                    AcquirePlate(self)
+                end
+            end)
+        end
         -- Re-arm reaction reading for the (possibly new) occupant: a recycled plate
         -- had its bar texture dropped after the previous mob's reaction was captured,
         -- so restore it (then RefreshPlateScrape re-captures and drops it again). On
