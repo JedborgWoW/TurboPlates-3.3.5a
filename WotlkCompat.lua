@@ -201,8 +201,12 @@ if not HAVE_NATIVE_ENGINE then
                 local _, mx = bar:GetMinMaxValues()
                 blizzFrame._tpHP = value
                 blizzFrame._tpHPMax = mx
-                local rr, gg, bb = bar:GetStatusBarColor()
-                blizzFrame._tpReaction = ColorToReactionKey(rr, gg, bb)
+                -- Only overwrite the cached reaction with a RECOGNISED colour - a
+                -- damage flash / odd tint can read as no-match and would otherwise
+                -- nil a good value, which flickers the friendly verdict and makes the
+                -- re-classify pass churn (full<->lite) on every health tick.
+                local rk = ColorToReactionKey(bar:GetStatusBarColor())
+                if rk then blizzFrame._tpReaction = rk end
                 -- Push a health re-render to TurboPlates. Stock 3.3.5a has no
                 -- UNIT_HEALTH for our synthetic plate tokens, and UNIT_HEALTH for
                 -- real units is keyed wrong in Core (ns.unitToPlate uses the token),
@@ -212,18 +216,25 @@ if not HAVE_NATIVE_ENGINE then
                 local token = blizzFrame._tpToken
                 if token and blizzFrame._tpAnnounced and ns.UpdateNameplateHealth then
                     ns.UpdateNameplateHealth(token)
-                    -- Piggyback a level refresh: the level text is set once at
-                    -- announce time and never re-triggered. If _tpLevel was stale
-                    -- at that point (recycled plate), the first HP change corrects
-                    -- the display without needing a separate event.
-                    if ns.UpdateLevelText then ns.UpdateLevelText(token) end
+                    -- Level refresh: the level text is set once at announce and, on a
+                    -- recycled plate, may be stale until corrected. Do it ONCE per
+                    -- occupant, not on every health tick - UpdateLevelText allocates
+                    -- (GetQuestDifficultyColor builds a table), so calling it on every
+                    -- damage event churned garbage -> periodic GC freezes in dungeons
+                    -- with several mobs under AoE.
+                    if not blizzFrame._tpLevelRefreshed and ns.UpdateLevelText then
+                        blizzFrame._tpLevelRefreshed = true
+                        ns.UpdateLevelText(token)
+                    end
                 end
                 if prevOVC then return prevOVC(bar, value, ...) end
             end)
             -- Colour can also change without a value change (e.g. tapping); catch
-            -- it via a method hook as a cheap supplement.
-            hooksecurefunc(healthBar, "SetStatusBarColor", function(bar, rr, gg, bb)
-                blizzFrame._tpReaction = ColorToReactionKey(rr, gg, bb)
+            -- it via a method hook as a cheap supplement. Same guard: never nil a
+            -- known reaction with an unrecognised colour.
+            hooksecurefunc(healthBar, "SetStatusBarColor", function(_, rr, gg, bb)
+                local rk = ColorToReactionKey(rr, gg, bb)
+                if rk then blizzFrame._tpReaction = rk end
             end)
         end
     end
@@ -1032,6 +1043,9 @@ if not HAVE_NATIVE_ENGINE then
 
         managedPlates[blizzFrame] = true
         blizzFrame._unit            = token
+        -- New occupant: allow exactly one level-text refresh on its first health
+        -- tick (see the OnValueChanged hook), in case the level was stale at announce.
+        blizzFrame._tpLevelRefreshed = nil
 
         CapturePlateRefs(blizzFrame)
         HideBlizzPlateRegions(blizzFrame)
