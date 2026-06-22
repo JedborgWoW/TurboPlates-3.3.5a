@@ -428,3 +428,54 @@ if type(GetCreatureIDFromGUID) ~= "function" then
     end
     _G.GetCreatureIDFromGUID = GetCreatureIDFromGUID
 end
+
+---------------------------------------------------------------------------
+-- WOW_PROJECT_* constants. Some upstream/library code branches on
+-- `WOW_PROJECT_ID == WOW_PROJECT_MAINLINE` to choose a retail-vs-Classic path.
+-- On stock 3.3.5a none of these globals exist, so that comparison degenerates
+-- to nil == nil -> true and wrongly takes the retail branch. Define them with
+-- their real retail values so the closest Classic path is chosen instead.
+---------------------------------------------------------------------------
+WOW_PROJECT_MAINLINE                = WOW_PROJECT_MAINLINE                or 1
+WOW_PROJECT_CLASSIC                 = WOW_PROJECT_CLASSIC                 or 2
+WOW_PROJECT_BURNING_CRUSADE_CLASSIC = WOW_PROJECT_BURNING_CRUSADE_CLASSIC or 5
+WOW_PROJECT_WRATH_CLASSIC           = WOW_PROJECT_WRATH_CLASSIC           or 11
+if type(WOW_PROJECT_ID) ~= "number" then
+    WOW_PROJECT_ID = WOW_PROJECT_WRATH_CLASSIC
+end
+
+---------------------------------------------------------------------------
+-- #132 ACCESS_VIOLATION guard: GameTooltip:SetSpellByID / :SetHyperlink.
+-- On stock 3.3.5a SetSpellByID does not exist. Worse, feeding SetHyperlink a
+-- "spell:<id>" link whose id is not on the core crashes the client *natively*
+-- (a hard C-side ACCESS_VIOLATION, not a catchable Lua error). TurboPlates
+-- hovers spell bars whose ids include Ascension/retail spells absent here
+-- (OptionsGUI debuff / highlight lists), so this fired in the wild (#132).
+-- Fix: validate every spell id with GetSpellInfo before building the link,
+-- and wrap SetHyperlink itself so any other path (including a ClassicAPI
+-- SetSpellByID that calls SetHyperlink under the hood) is covered too.
+---------------------------------------------------------------------------
+do
+    local meta = GameTooltip and getmetatable(GameTooltip)
+    local index = meta and meta.__index
+    if type(index) == "table" then
+        local rawSetHyperlink = index.SetHyperlink
+        if type(rawSetHyperlink) == "function" then
+            function index:SetHyperlink(link, ...)
+                if type(link) == "string" then
+                    local id = link:match("^spell:(%d+)")
+                    if id and not GetSpellInfo(tonumber(id)) then
+                        return  -- unknown spell -> would ACCESS_VIOLATION
+                    end
+                end
+                return rawSetHyperlink(self, link, ...)
+            end
+        end
+        -- Define/override with a validated implementation. Always check
+        -- GetSpellInfo first; never hand SetHyperlink an unknown spell id.
+        function index:SetSpellByID(spellId)
+            if not spellId or not GetSpellInfo(spellId) then return end
+            return self:SetHyperlink("spell:"..spellId)
+        end
+    end
+end
