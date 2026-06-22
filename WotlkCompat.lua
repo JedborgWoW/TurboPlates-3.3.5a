@@ -333,15 +333,7 @@ if not HAVE_NATIVE_ENGINE then
         local cur, max = PlateHealth(blizzFrame)
         if cur ~= nil then
             if cur ~= _UnitHealth(unit) then return false end
-            -- Full-HP non-player: health can't pick this plate out among same-named
-            -- mobs. For the target the engine renders ITS plate at full alpha and
-            -- dims the rest, so use that to disambiguate (same signal ns.UnitIsUnit
-            -- uses); for other units reject as ambiguous. Without this, an opener DoT
-            -- on a full-HP target (Garrote, Rend, Serpent Sting, ...) never bound the
-            -- plate, so the debuff stayed invisible until the mob dropped below max HP.
-            if not _UnitIsPlayer(unit) and max and cur == max then
-                return unit == "target" and blizzFrame:GetAlpha() >= 0.99
-            end
+            if not _UnitIsPlayer(unit) and max and cur == max then return false end
         end
         return true
     end
@@ -475,6 +467,16 @@ if not HAVE_NATIVE_ENGINE then
                 local uLvl   = _UnitLevel(unit)
                 local uHP    = _UnitHealth(unit)
                 local uIsPlr = _UnitIsPlayer(unit)
+                -- A full-HP non-player can't be told apart from a same-named
+                -- neighbour by health, so we can't bind it by an exact HP match.
+                -- But if it's the ONLY same-named full-HP candidate (e.g. a single
+                -- mob you just opened on) it's unambiguous, so remember it and bind
+                -- after the scan. With two identical full-HP mobs we leave it
+                -- unbound rather than risk binding (and glowing) the wrong one -
+                -- health resolves it the instant either takes damage. (Don't use
+                -- plate alpha to disambiguate: with non-target dimming off, every
+                -- plate reads full alpha, so it would pick an arbitrary one.)
+                local fullHpFrame, fullHpAmbiguous = nil, false
                 for c = 1, nCand do
                     local frame = candFrame[c]
                     if frame and not frame._tpMatchedUnit and candName[c]
@@ -482,22 +484,23 @@ if not HAVE_NATIVE_ENGINE then
                         local lvl = candLvl[c]
                         if not (lvl and uLvl and uLvl > 0 and lvl ~= uLvl) then
                             local cur, max = candCur[c], candMax[c]
-                            local hpOk = true
-                            if cur ~= nil then
-                                if cur ~= uHP then hpOk = false
-                                elseif not uIsPlr and max and cur == max then
-                                    -- Full HP: health is ambiguous among same-named
-                                    -- mobs; only the target's plate is at full alpha
-                                    -- (engine dims the rest). See PlateMatchesUnit.
-                                    hpOk = (unit == "target") and frame:GetAlpha() >= 0.99
-                                end
-                            end
-                            if hpOk then
+                            if cur ~= nil and cur ~= uHP then
+                                -- health mismatch: not this plate
+                            elseif cur ~= nil and not uIsPlr and max and cur == max then
+                                if fullHpFrame then fullHpAmbiguous = true
+                                else fullHpFrame = frame end
+                            else
+                                -- exact sub-max HP match (or no HP read): unambiguous
                                 SetMatch(frame, unit)
+                                fullHpFrame = nil
                                 break
                             end
                         end
                     end
+                end
+                if fullHpFrame and not fullHpAmbiguous
+                   and not matchUnitToPlate[unit] then
+                    SetMatch(fullHpFrame, unit)
                 end
             end
         end
