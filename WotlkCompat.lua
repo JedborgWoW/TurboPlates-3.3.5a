@@ -425,6 +425,13 @@ if not HAVE_NATIVE_ENGINE then
         if unit then
             matchUnitToPlate[unit] = blizzFrame
             CacheUnitByName(unit)
+            -- The plate just gained its real unit. Re-read its raid marker now: a
+            -- marker placed before the plate existed (e.g. on a full-HP target, which
+            -- binds here via UpdateMatches rather than at acquire) was read as nil by
+            -- FullPlateUpdate pre-bind, and RAID_TARGET_UPDATE won't fire again.
+            if blizzFrame._tpAnnounced and ns.UpdateRaidIcon then
+                ns.UpdateRaidIcon(blizzFrame._tpToken)
+            end
         end
     end
 

@@ -4822,6 +4822,9 @@ local function UpdateRaidIcon(unit)
         myPlate.raidIcon:Hide()
     end
 end
+-- Exposed so the compat layer can re-read a plate's raid marker the moment it binds
+-- to its real unit (a marker placed before the plate existed is otherwise missed).
+ns.UpdateRaidIcon = UpdateRaidIcon
 
 -- Ensure quest icon exists (creates on-demand for any plate type)
 local function EnsureQuestIcon(myPlate)
