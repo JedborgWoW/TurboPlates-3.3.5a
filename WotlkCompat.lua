@@ -569,6 +569,37 @@ if not HAVE_NATIVE_ENGINE then
                 ReleaseMatch(frame)
             end
         end
+        -- Correct a premature "target" binding: if the currently bound plate is
+        -- dimmed by the engine (alpha < 0.99) while an unmatched same-named/same-
+        -- level plate is at full alpha, we grabbed the wrong plate first (real
+        -- target was out of nameplate range when the initial binding fired). Release
+        -- the stale binding NOW, before candidate collection, so both plates enter
+        -- the candidate pool and the existing alpha-disambiguation re-runs cleanly
+        -- this cycle and binds the correct one.
+        -- PlateStillMatchesUnit (name-only) would otherwise keep the wrong plate
+        -- bound indefinitely because the name never changes.
+        -- Safe when non-target dimming is OFF: all plates alpha >=0.99 -> outer
+        -- condition fails -> no release -> status quo.
+        local tf = matchUnitToPlate["target"]
+        if tf and _UnitExists("target") and not _UnitIsDeadOrGhost("target")
+           and tf.GetAlpha and tf:GetAlpha() < 0.99 then
+            local tName = _UnitName("target")
+            local tLvl  = _UnitLevel("target")
+            for frame in pairs(managedPlates) do
+                if frame:IsShown() and not frame._tpMatchedUnit then
+                    local fn = PlateName(frame)
+                    if fn == tName then
+                        local fl = PlateLevel(frame)
+                        if not (fl and tLvl and tLvl > 0 and fl ~= tLvl) then
+                            if (frame.GetAlpha and frame:GetAlpha() or 1.0) >= 0.99 then
+                                ReleaseMatch(tf)
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
         -- Collect unmatched, shown plates and scrape name/level/health ONCE each.
         local nCand = 0
         for frame in pairs(managedPlates) do
