@@ -32,6 +32,7 @@ Core.lua
 Auras.lua
 HealerDetection.lua
 Nameplates.lua
+ThreatAggro.lua
 Stacking.lua
 Castbars.lua
 OptionsGUI.lua

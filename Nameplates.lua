@@ -4269,6 +4269,19 @@ UpdateColor = function(unit)
     --         2 = insecurely tanking, 3 = securely tanking
     local isTanking, status = UnitDetailedThreatSituation("player", unit)
 
+    -- Stock 3.3.5a: the threat API can't read an UNBOUND plate token, so a mob
+    -- attacking you that isn't your target returned nil and missed threat colouring
+    -- (it stayed default hostile instead of your aggro colour). Only when the API
+    -- gave us nothing (status nil = unbound, or no threat data) do we fall back to
+    -- the combat log (ThreatAggro.lua), which knows it's hitting you with no token
+    -- needed, and treat that as full aggro. Restores the per-plate colouring the
+    -- token engine gave on Ascension; the existing branching paints it (DPS ->
+    -- dpsAggroColor, tank -> secureColor). We DON'T override a real status: in a
+    -- group a mob can cleave/AoE you without you holding aggro - the API knows.
+    if status == nil and ns.PlayerHasAggroFrom and ns.PlayerHasAggroFrom(myPlate, unit) then
+        isTanking, status = true, 3
+    end
+
     -- 5. Neutral NPCs (reaction 4) and Critters - yellow if not in combat with us
     local reaction = UnitReaction(unit, "player")
     if status == nil and ((reaction and reaction == 4) or UnitCreatureType(unit) == "Critter") then
