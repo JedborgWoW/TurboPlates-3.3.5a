@@ -5177,7 +5177,7 @@ local function UpdateQuestIcon(unit)
     -- client - icons came out huge / inconsistent. With false it only sets the texture
     -- and our fixed base size (below) controls, so all quest icons are uniform.
     myPlate.questIcon:SetAtlas(atlas or "questnormal", false)
-    local base = 24
+    local base = 20  -- 20 * (default scale 0.6) = 12px; scales with questIconScale
     local scale = ns.c_questIconScale * 0.5  -- Match Ascension's internal scaling (* 0.5)
     myPlate.questIcon:SetSize(base * scale, base * scale)
     myPlate.questIcon._origW, myPlate.questIcon._origH = base, base
@@ -5300,7 +5300,7 @@ local function UpdateLiteQuestIcon(nameplate, unit)
     -- Apply atlas texture. Fixed base size - UseAtlasSize/GetSize is unreliable on
     -- this client and gave inconsistent icon sizes (see UpdateQuestIcon).
     icon:SetAtlas(atlas or "questnormal", false)
-    local base = 24
+    local base = 20  -- 20 * (default scale 0.6) = 12px; scales with questIconScale
     local scale = ns.c_questIconScale * 0.5
     icon:SetSize(base * scale, base * scale)
 
