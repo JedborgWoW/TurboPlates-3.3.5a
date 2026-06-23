@@ -1299,15 +1299,30 @@ if not HAVE_NATIVE_ENGINE then
 
     local visible = {}
     local knownPlates = {}   -- every WorldFrame child ever confirmed a nameplate (the pool)
-    -- Spell NAME for untargeted casts: the Blizzard nameplate exposes the cast
-    -- bar + icon but NOT the spell name (it never renders one), so there's nothing
-    -- to scrape for the name. The combat log does have it though - SPELL_CAST_START
-    -- fires for EVERY caster in range (no unitID needed) with the spell id/name.
-    -- Cache name+icon keyed by caster NAME; the scrape (cb:IsShown) tells us WHICH
-    -- same-named plate is actually casting, so name-keying is enough to disambiguate.
-    -- [caster name] = { name = spell, icon = tex, t = GetTime() }
-    local castInfoByName = {}
-    local CAST_INFO_TTL = 12   -- drop stale entries so a new cast we missed can't show an old name
+    -- Untargeted-cast tracking, driven ENTIRELY from the combat log. Stock 3.3.5a
+    -- (no awesome_wotlk) does NOT engine-drive the Blizzard nameplate cast bar, so
+    -- there was nothing to scrape and only target/focus/mouseover casts (the event
+    -- path) ever showed. SPELL_CAST_START fires for EVERY caster in range with no
+    -- unitID, and GetSpellInfo gives the icon AND the base cast time - enough to
+    -- render a self-animating bar with no unit and no Blizzard bar. Cached by GUID
+    -- (pinned-plate path) and by name (unique-plate fallback), mirroring the debuff
+    -- cache. entry = { name, icon, start, duration, srcName, guid }
+    local castInfoByName = {}  -- [caster name] = entry  (last caster of that name)
+    local castByGUID = {}      -- [caster GUID] = entry
+    local castNameCount = {}   -- scratch: count of visible unbound plates per name
+    local lastCastSweep = 0    -- throttle for the stale-entry sweep below
+    local CAST_GRACE = 0.5     -- keep the bar this long past the estimated cast time
+                               -- (haste makes the real cast shorter; the end event
+                               -- normally clears it first) before treating a missed
+                               -- end event as stale.
+    -- Fully remove a cast entry from both indices (entries are shared between them).
+    local function ClearCastEntry(entry)
+        if not entry then return end
+        if entry.guid and castByGUID[entry.guid] == entry then castByGUID[entry.guid] = nil end
+        if entry.srcName and castInfoByName[entry.srcName] == entry then
+            castInfoByName[entry.srcName] = nil
+        end
+    end
     local function ScanWorldFrame()
         wipe(visible)
         local kids = { WorldFrame:GetChildren() }
@@ -1344,59 +1359,87 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
-    -- Mirror the engine-driven Blizzard nameplate castbar onto our own for plates
-    -- we have NO unitID for (untargeted casters) - the only way to show their casts
-    -- on stock 3.3.5a, since UNIT_SPELLCAST_* / UnitCastingInfo answer only for
-    -- target/focus/mouseover/party/raid. Plates that DO have a real unit are left to
-    -- the event-driven path (Castbars.lua), which gives spell name + icon + timer;
-    -- this only handles the unbound remainder. Runs every frame so the bar animates.
+    -- Render untargeted casters' cast bars from the combat-log cache (built above).
+    -- This is the ONLY source on stock 3.3.5a: UNIT_SPELLCAST_* / UnitCastingInfo
+    -- answer only for target/focus/mouseover/party/raid (the event-driven path in
+    -- Castbars.lua handles those), and the engine doesn't drive the Blizzard nameplate
+    -- cast bar to scrape. We self-animate from start + base cast time; the real end
+    -- event (or the grace cap) hides it. Identity matches the debuff system: the
+    -- plate's pinned GUID first, else name but ONLY for the unique plate of that name
+    -- (so a cast can't bleed onto a same-named neighbour). Runs every frame.
     local function ProcessPlateCasts()
         if not (ns.ScrapeCastStart and ns.ScrapeCastUpdate and ns.ScrapeCastStop) then return end
+        local now = GetTime()
+        -- Periodically drop cast entries whose end event we never saw (caster cast
+        -- out of nameplate range, then died/despawned): the per-plate stale check
+        -- below only clears casters that currently have a visible plate.
+        if now - lastCastSweep > 2 then
+            lastCastSweep = now
+            for _, e in pairs(castByGUID) do
+                if now - e.start > e.duration + CAST_GRACE then ClearCastEntry(e) end
+            end
+        end
+        -- One pass to count visible unbound plates per scraped name (uniqueness gate).
+        wipe(castNameCount)
+        for frame in pairs(knownPlates) do
+            if frame:IsShown() and managedPlates[frame] and frame._tpAnnounced
+               and not frame._tpMatchedUnit then
+                local nm = PlateName(frame)
+                if nm then castNameCount[nm] = (castNameCount[nm] or 0) + 1 end
+            end
+        end
         for frame in pairs(knownPlates) do
             local token = frame._tpToken
-            local cb = frame._tpCastBar
             local active = frame:IsShown() and managedPlates[frame] and frame._tpAnnounced and token
-            if active and not frame._tpMatchedUnit and cb and cb.IsShown and cb:IsShown() then
-                -- Untargeted caster: mirror the Blizzard bar's fill.
-                local minv, maxv = cb:GetMinMaxValues()
-                local val = cb:GetValue() or 0
-                local fill = 0
-                if maxv and minv and maxv > minv then fill = (val - minv) / (maxv - minv) end
-                -- Read the casting spell's icon off the (suppressed) Blizzard region.
-                -- Only accept an actual Interface\Icons path, so a mis-indexed region
-                -- on some core yields "no icon" rather than a stray UI texture.
-                local icon
-                local si = frame._tpSpellIcon
-                if si and si.GetTexture then
-                    local tex = si:GetTexture()
-                    if tex and type(tex) == "string" and tex:lower():find("icons", 1, true) then
-                        icon = tex
+            -- Defensive: if a core DOES drive the Blizzard cast bar, keep its texture
+            -- dropped so no Blizzard cast art leaks next to our plate.
+            local cb = frame._tpCastBar
+            if cb and cb.IsShown and cb:IsShown() and cb.SetStatusBarTexture then
+                cb:SetStatusBarTexture(nil)
+            end
+            local info
+            if active and not frame._tpMatchedUnit then
+                local mp = frame.myPlate
+                local pname = PlateName(frame)
+                -- PRIMARY: this plate's pinned GUID, when it still shows that mob.
+                local pg = mp and mp.pinnedGUID
+                if pg and castByGUID[pg] and mp.pinnedName == pname then
+                    info = castByGUID[pg]
+                elseif pname and castNameCount[pname] == 1 then
+                    -- FALLBACK: name, only when this is the unique plate of that name.
+                    info = castInfoByName[pname]
+                end
+                -- Past the estimated cast time with no end event: treat as stale and
+                -- drop it (bounds memory for a cast whose end we never saw).
+                if info and (now - info.start) > info.duration + CAST_GRACE then
+                    ClearCastEntry(info)
+                    info = nil
+                end
+            end
+            if info then
+                -- Icon from the spell (combat log); fall back to the scraped Blizzard
+                -- spell-icon region only if GetSpellInfo gave us none.
+                local icon = info.icon
+                if not icon then
+                    local si = frame._tpSpellIcon
+                    if si and si.GetTexture then
+                        local tex = si:GetTexture()
+                        if type(tex) == "string" and tex:lower():find("icons", 1, true) then
+                            icon = tex
+                        end
                     end
                 end
-                -- Spell NAME (and a cleaner icon) from the combat-log cache, matched
-                -- by this plate's name. The scrape already told us THIS plate is the
-                -- one casting, so a same-named neighbour won't steal the name.
-                local spellName
-                local pname = PlateName(frame)
-                local info = pname and castInfoByName[pname]
-                if info and (GetTime() - info.t) <= CAST_INFO_TTL then
-                    spellName = info.name
-                    -- Scraped icon is per-plate (always the right mob); only fall
-                    -- back to the combat-log icon if the region gave us nothing.
-                    if not icon and info.icon then icon = info.icon end
-                end
+                local fill = (now - info.start) / info.duration
+                if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
                 if not frame._tpScraping then
                     frame._tpScraping = true
-                    ns:ScrapeCastStart(token, false, icon, spellName)
+                    ns:ScrapeCastStart(token, false, icon, info.name)
                 end
-                ns:ScrapeCastUpdate(token, fill, false, icon, spellName)
-                -- The engine may re-apply the bar texture per cast - keep it dropped
-                -- so no Blizzard cast art leaks next to our plate.
-                if cb.SetStatusBarTexture then cb:SetStatusBarTexture(nil) end
+                ns:ScrapeCastUpdate(token, fill, false, icon, info.name)
             elseif frame._tpScraping then
-                -- Cast ended, plate hidden/recycled, or it just gained a real unit
-                -- (event path takes over) - tear our mirror down. ScrapeCastStop
-                -- no-ops if the event path has already claimed the castbar.
+                -- Cast ended, plate hidden/recycled, or it gained a real unit (event
+                -- path takes over) - tear our mirror down. ScrapeCastStop no-ops if
+                -- the event path has already claimed the castbar.
                 frame._tpScraping = nil
                 if token then ns:ScrapeCastStop(token) end
             end
@@ -1522,17 +1565,28 @@ if not HAVE_NATIVE_ENGINE then
         if destName and destFlags then
             isPlayerCache[destName] = (bit.band(destFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
         end
-        -- Capture the spell NAME of any cast in range so untargeted nameplates can
-        -- show it (the scrape gives the bar + which plate, this gives the name).
-        if subevent == "SPELL_CAST_START" and srcName and spellName then
-            -- Prefer the spell's real icon (and confirm the name) via GetSpellInfo;
-            -- it's nil-safe for unknown/private-server ids and never crashes (unlike
-            -- SetSpellByID). Fall back to the combat-log name + scraped icon.
-            local giName, _, giIcon = GetSpellInfo(spellId)
-            castInfoByName[srcName] = { name = giName or spellName, icon = giIcon, t = GetTime() }
-        elseif (subevent == "SPELL_CAST_SUCCESS" or subevent == "SPELL_CAST_FAILED"
-                or subevent == "SPELL_INTERRUPT") and srcName then
-            castInfoByName[srcName] = nil
+        -- Capture every in-range cast so untargeted nameplates can render it. This is
+        -- the ONLY source for an untargeted cast on stock 3.3.5a (the engine doesn't
+        -- drive the Blizzard nameplate cast bar to scrape).
+        if subevent == "SPELL_CAST_START" and srcGUID and srcName then
+            -- GetSpellInfo is nil-safe for unknown/private-server ids and never
+            -- crashes (unlike SetSpellByID). On 3.3.5a it returns
+            -- name, rank, icon, cost, isFunnel, powerType, castTime(ms), ... - so the
+            -- 7th value is the base cast time we use to animate the bar.
+            local giName, _, giIcon, _, _, _, giCastMs = GetSpellInfo(spellId)
+            local dur = (type(giCastMs) == "number" and giCastMs > 0) and (giCastMs / 1000) or nil
+            if dur then
+                local now = GetTime()
+                local entry = { name = giName or spellName, icon = giIcon,
+                                start = now, duration = dur, srcName = srcName, guid = srcGUID }
+                castByGUID[srcGUID] = entry
+                castInfoByName[srcName] = entry
+            end
+        elseif subevent == "SPELL_CAST_SUCCESS" or subevent == "SPELL_CAST_FAILED"
+               or subevent == "SPELL_INTERRUPT" then
+            -- End of cast. Clear by GUID, and the name entry only if it's the SAME
+            -- cast (don't wipe a newer same-named caster's entry).
+            if srcGUID then ClearCastEntry(castByGUID[srcGUID]) end
         end
     end)
 

@@ -216,10 +216,10 @@ end
 
 -- OnUpdate handler for smooth progress bar animation
 local function CastbarOnUpdate(self, elapsed)
-    -- Scrape-driven casts (untargeted mobs) are positioned/filled directly by the
-    -- compat layer's per-frame poll from the Blizzard nameplate castbar, since we
-    -- have no real unitID and thus no start/end times to self-animate. Bail out so
-    -- this handler never hides or re-times them.
+    -- Combat-log-driven casts (untargeted mobs) are filled directly by the compat
+    -- layer's per-frame ProcessPlateCasts (computed from the CLEU cast start + base
+    -- cast time), since we have no real unitID to self-animate from. Bail out so this
+    -- handler never hides or re-times them.
     if self.scraped then return end
     if self.casting then
         self.duration = self.duration + elapsed
@@ -601,14 +601,15 @@ function ns:CheckExistingCast(unit)
 end
 
 -------------------------------------------------------------------------------
--- SCRAPE-DRIVEN CASTS (untargeted mobs)
--- On stock 3.3.5a UNIT_SPELLCAST_* / UnitCastingInfo only answer for units with
--- a real unitID (target/focus/mouseover/party/raid). For every OTHER visible
--- caster the engine still drives the hidden Blizzard nameplate castbar, so the
--- compat layer mirrors that bar's fill onto ours here. No spell name / icon /
--- exact timer is available without a real unit - just the bar + colour. As soon
--- as the mob gains a real unitID, the event path (CastStart) takes over with the
--- full display and clears the `scraped` flag.
+-- COMBAT-LOG-DRIVEN CASTS (untargeted mobs)
+-- On stock 3.3.5a UNIT_SPELLCAST_* / UnitCastingInfo only answer for units with a
+-- real unitID (target/focus/mouseover/party/raid), and the engine does NOT drive
+-- the Blizzard nameplate cast bar (so there is nothing to scrape). For every other
+-- visible caster the compat layer instead reads SPELL_CAST_START from the combat
+-- log (spell name + icon + base cast time via GetSpellInfo) and drives these
+-- functions every frame, self-animating the bar from start + cast time. As soon as
+-- the mob gains a real unitID, the event path (CastStart) takes over with the full
+-- display and clears the `scraped` flag.
 -------------------------------------------------------------------------------
 
 -- Position/show (or hide) the scraped spell icon. Icon comes from the Blizzard
