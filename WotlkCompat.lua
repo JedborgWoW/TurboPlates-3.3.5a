@@ -1196,6 +1196,22 @@ if not HAVE_NATIVE_ENGINE then
         -- New occupant: allow exactly one level-text refresh on its first health
         -- tick (see the OnValueChanged hook), in case the level was stale at announce.
         blizzFrame._tpLevelRefreshed = nil
+        -- Drop the previous occupant's pinned aura-identity (CLEU debuff GUID) and
+        -- aura colour override. Core clears these on OnNamePlateRemoved, but the
+        -- engine can RECYCLE a plate frame for a new mob without a detected remove
+        -- (C-side hide/show with no WorldFrame child-count change). When that mob
+        -- shares the previous one's name AND level, PinSignatureValid (name+level
+        -- only) still passes, so the recycled plate inherits the old mob's tracked
+        -- debuffs and colour - they "bleed" onto a same-named neighbour. Acquire is
+        -- the authoritative new-occupant signal, so reset here; a genuine re-bind
+        -- re-pins immediately via OnPlateBound.
+        local mp = blizzFrame.myPlate
+        if mp then
+            mp.pinnedGUID        = nil
+            mp.pinnedName        = nil
+            mp.pinnedLevel       = nil
+            mp._auraColorOverride = nil
+        end
         -- Pooled plates are hidden/re-shown without a WorldFrame child-count change,
         -- so a re-show is otherwise only noticed on the throttled scan (~0.1s) - long
         -- enough that the Blizzard name/level/bar flash at the Blizzard position
