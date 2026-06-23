@@ -38,9 +38,24 @@ function ns.PlayerHasAggroFrom(myPlate, unit)
         local e = aggroByGUID[pg]
         return e ~= nil and (now - e.t) <= AGGRO_TTL
     end
-    -- FALLBACK: name (never-bound mob). Can't tell same-named apart without a token.
+    -- FALLBACK: name-only, and ONLY when this is the UNIQUE visible plate of that
+    -- name. Same-named mobs can't be told apart without a token; if >1 plate shares
+    -- the name, the aggro colour would bleed onto neighbours not actually hitting
+    -- the player. Mirror the debuff logic: ambiguous -> show nothing; a single
+    -- same-named plate (or one that gets targeted/moused-over and gains a pin) is
+    -- unambiguous. Health damage resolves the pin the instant any mob takes a hit.
     local n = name and aggroByName[name]
-    return n ~= nil and (now - n.t) <= AGGRO_TTL
+    if not (n and (now - n.t) <= AGGRO_TTL) then return false end
+    if ns.unitToPlate then
+        local count = 0
+        for token in pairs(ns.unitToPlate) do
+            if UnitName(token) == name then
+                count = count + 1
+                if count > 1 then return false end  -- ambiguous: don't bleed
+            end
+        end
+    end
+    return true
 end
 
 -- Re-colour every visible plate of a mob name (no-op until Nameplates has exposed
