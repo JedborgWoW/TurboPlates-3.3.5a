@@ -1079,6 +1079,25 @@ if not HAVE_NATIVE_ENGINE then
                     child:SetAlpha(0)
                     SuppressRegion(child)
                     blizzFrame._tpHealthTexLive = true
+                elseif child == castBar then
+                    -- Keep the cast bar PARENTED (do NOT reparent) so the engine
+                    -- keeps driving its shown-state and value - that's the live
+                    -- "this mob is casting" signal for plates we have no unitID for
+                    -- (untargeted casters), which ProcessPlateCasts mirrors onto our
+                    -- own castbar. Reparenting would freeze it exactly like the
+                    -- health bar. We don't want the Blizzard cast ART though, so drop
+                    -- the bar texture and its child regions (bg/border/spark). The
+                    -- engine can re-apply the texture per cast, so ProcessPlateCasts
+                    -- re-drops it each frame while the bar is shown.
+                    if child.SetStatusBarTexture then child:SetStatusBarTexture(nil) end
+                    local cregions = { child:GetRegions() }
+                    for ci = 1, #cregions do
+                        local cr = cregions[ci]
+                        if cr then
+                            if cr.SetTexture then cr:SetTexture() end
+                            if cr.Hide then cr:Hide() end
+                        end
+                    end
                 else
                     child:SetParent(blizzHiddenParent)
                     child:SetAlpha(0)
@@ -1265,6 +1284,42 @@ if not HAVE_NATIVE_ENGINE then
         end
     end
 
+    -- Mirror the engine-driven Blizzard nameplate castbar onto our own for plates
+    -- we have NO unitID for (untargeted casters) - the only way to show their casts
+    -- on stock 3.3.5a, since UNIT_SPELLCAST_* / UnitCastingInfo answer only for
+    -- target/focus/mouseover/party/raid. Plates that DO have a real unit are left to
+    -- the event-driven path (Castbars.lua), which gives spell name + icon + timer;
+    -- this only handles the unbound remainder. Runs every frame so the bar animates.
+    local function ProcessPlateCasts()
+        if not (ns.ScrapeCastStart and ns.ScrapeCastUpdate and ns.ScrapeCastStop) then return end
+        for frame in pairs(knownPlates) do
+            local token = frame._tpToken
+            local cb = frame._tpCastBar
+            local active = frame:IsShown() and managedPlates[frame] and frame._tpAnnounced and token
+            if active and not frame._tpMatchedUnit and cb and cb.IsShown and cb:IsShown() then
+                -- Untargeted caster: mirror the Blizzard bar's fill.
+                local minv, maxv = cb:GetMinMaxValues()
+                local val = cb:GetValue() or 0
+                local fill = 0
+                if maxv and minv and maxv > minv then fill = (val - minv) / (maxv - minv) end
+                if not frame._tpScraping then
+                    frame._tpScraping = true
+                    ns:ScrapeCastStart(token, false)
+                end
+                ns:ScrapeCastUpdate(token, fill, false)
+                -- The engine may re-apply the bar texture per cast - keep it dropped
+                -- so no Blizzard cast art leaks next to our plate.
+                if cb.SetStatusBarTexture then cb:SetStatusBarTexture(nil) end
+            elseif frame._tpScraping then
+                -- Cast ended, plate hidden/recycled, or it just gained a real unit
+                -- (event path takes over) - tear our mirror down. ScrapeCastStop
+                -- no-ops if the event path has already claimed the castbar.
+                frame._tpScraping = nil
+                if token then ns:ScrapeCastStop(token) end
+            end
+        end
+    end
+
     local lastChildCount = -1
     local matchElapsed = 0
     local driver = CreateFrame("Frame")
@@ -1280,6 +1335,8 @@ if not HAVE_NATIVE_ENGINE then
         -- Every frame: catch C-side show/hide of known pooled plates immediately,
         -- so appearance/disappearance is ~1 frame, not up to a throttled tick.
         ProcessPlateVisibility()
+        -- Every frame: mirror engine-driven casts for untargeted mobs.
+        ProcessPlateCasts()
         matchElapsed = matchElapsed + elapsed
         if matchElapsed >= 0.1 * (ns.c_throttleMultiplier or 1) then
             matchElapsed = 0

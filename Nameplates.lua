@@ -680,6 +680,10 @@ function ns.OnPlateBound(blizzFrame, realGUID)
     -- update otherwise only fires on FullPlateUpdate / QUEST_LOG_UPDATE, never on a
     -- plain mouseover, so item-drop quest mobs were never learned from a hover.
     if blizzFrame._tpToken and ns.UpdateQuestIcon then ns.UpdateQuestIcon(blizzFrame._tpToken) end
+    -- Binding gives us a real unit, so UnitCastingInfo finally answers. If the mob
+    -- was ALREADY mid-cast when we targeted/focused/moused-over it, no fresh
+    -- UNIT_SPELLCAST_START will fire - so pick up the in-progress cast here.
+    if blizzFrame._tpToken and ns.CheckExistingCast then ns:CheckExistingCast(blizzFrame._tpToken) end
 end
 
 -- Arena detection for arena-specific features

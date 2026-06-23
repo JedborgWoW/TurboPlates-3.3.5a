@@ -195,6 +195,7 @@ local function ResetCastbar(castbar)
     castbar.castID = nil
     castbar.spellName = nil
     castbar.holdTime = 0
+    castbar.scraped = nil
 end
 
 -- Hide castbar and icon completely
@@ -215,6 +216,11 @@ end
 
 -- OnUpdate handler for smooth progress bar animation
 local function CastbarOnUpdate(self, elapsed)
+    -- Scrape-driven casts (untargeted mobs) are positioned/filled directly by the
+    -- compat layer's per-frame poll from the Blizzard nameplate castbar, since we
+    -- have no real unitID and thus no start/end times to self-animate. Bail out so
+    -- this handler never hides or re-times them.
+    if self.scraped then return end
     if self.casting then
         self.duration = self.duration + elapsed
         if self.duration >= self.max then
@@ -278,7 +284,10 @@ local function CastStart(castbar, unit)
         HideCastbar(castbar)
         return
     end
-    
+
+    -- A real cast event is taking over from any scrape-driven mirror.
+    castbar.scraped = nil
+
     -- Try casting first
     -- WoW 3.3.5 UnitCastingInfo returns: name, nameSubtext, text, texture, startTime, endTime, isTradeSkill, castID, notInterruptible
     local name, _, _, texture, startTime, endTime, _, castID, notInterruptible = UnitCastingInfo(unit)
@@ -589,6 +598,91 @@ function ns:CheckExistingCast(unit)
     if not myPlate or not myPlate.castbar then return end
     
     CastStart(myPlate.castbar, unit)
+end
+
+-------------------------------------------------------------------------------
+-- SCRAPE-DRIVEN CASTS (untargeted mobs)
+-- On stock 3.3.5a UNIT_SPELLCAST_* / UnitCastingInfo only answer for units with
+-- a real unitID (target/focus/mouseover/party/raid). For every OTHER visible
+-- caster the engine still drives the hidden Blizzard nameplate castbar, so the
+-- compat layer mirrors that bar's fill onto ours here. No spell name / icon /
+-- exact timer is available without a real unit - just the bar + colour. As soon
+-- as the mob gains a real unitID, the event path (CastStart) takes over with the
+-- full display and clears the `scraped` flag.
+-------------------------------------------------------------------------------
+
+-- Begin (or hand off to) a scrape-driven cast. `unit` is the plate token.
+function ns:ScrapeCastStart(unit, notInterruptible)
+    if not GetShowCastbar() then return end
+    local plates = self.unitToPlate
+    if not plates then return end
+    local myPlate = plates[unit]
+    if not myPlate or not myPlate.castbar then return end
+    if myPlate.isPlayer then return end  -- never on the player's personal plate
+
+    local castbar = myPlate.castbar
+    castbar.scraped = true
+    castbar.casting = nil
+    castbar.channeling = nil
+    castbar.castID = nil
+    castbar.spellName = nil
+    castbar.holdTime = 0
+    castbar.notInterruptible = notInterruptible
+
+    castbar:SetMinMaxValues(0, 1)
+    castbar:SetValue(0)
+    castbar.spellText:SetText("")
+    castbar.timeText:SetText("")
+    if castbar.icon then castbar.icon:Hide() end
+    if castbar.iconBorder then castbar.iconBorder:Hide() end
+    if castbar.spark then castbar.spark:Hide() end
+
+    if notInterruptible then
+        castbar:SetStatusBarColor(GetNoInterruptColor())
+    else
+        castbar:SetStatusBarColor(GetCastColor())
+    end
+
+    -- Highlight glow keys off the spell name, which we don't have here.
+    castbar.isHighlighted = nil
+    StopCastbarGlow(castbar)
+
+    castbar:Show()
+end
+
+-- Mirror the Blizzard bar's fill (0..1). Called every frame while scraping.
+function ns:ScrapeCastUpdate(unit, fill, notInterruptible)
+    local plates = self.unitToPlate
+    if not plates then return end
+    local myPlate = plates[unit]
+    if not myPlate or not myPlate.castbar then return end
+
+    local castbar = myPlate.castbar
+    if not castbar.scraped then return end
+
+    if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
+    castbar:SetValue(fill)
+
+    if castbar.notInterruptible ~= notInterruptible then
+        castbar.notInterruptible = notInterruptible
+        if notInterruptible then
+            castbar:SetStatusBarColor(GetNoInterruptColor())
+        else
+            castbar:SetStatusBarColor(GetCastColor())
+        end
+    end
+end
+
+-- End a scrape-driven cast (Blizzard bar hidden, plate recycled, etc.).
+function ns:ScrapeCastStop(unit)
+    local plates = self.unitToPlate
+    if not plates then return end
+    local myPlate = plates[unit]
+    if not myPlate or not myPlate.castbar then return end
+
+    local castbar = myPlate.castbar
+    if not castbar.scraped then return end  -- event path owns it now; leave alone
+    HideCastbar(castbar)
 end
 
 -- Clean up castbar when nameplate is removed
