@@ -35,6 +35,15 @@ local HAVE_NATIVE_ENGINE = (type(C_NamePlate) == "table"
     and type(C_NamePlate.GetNamePlateForUnit) == "function"
     and type(C_NamePlateManager) == "table")
 
+-- awesome_wotlk DLL adds C_NamePlate.GetNamePlateForUnit + native events but
+-- NOT C_NamePlateManager, so HAVE_NATIVE_ENGINE stays false and our compat
+-- layer runs normally. We detect it here (before we overwrite C_NamePlate)
+-- to expose it in diagnostics and to fall back to the native resolver inside
+-- our GetNamePlateForUnit polyfill.
+local HAVE_AWESOME_WOTLK = (not HAVE_NATIVE_ENGINE
+    and type(C_NamePlate) == "table"
+    and type(C_NamePlate.GetNamePlateForUnit) == "function")
+
 local WorldFrame   = WorldFrame
 local CreateFrame  = CreateFrame
 local abs          = math.abs
@@ -1236,20 +1245,17 @@ if not HAVE_NATIVE_ENGINE then
         -- New occupant: allow exactly one level-text refresh on its first health
         -- tick (see the OnValueChanged hook), in case the level was stale at announce.
         blizzFrame._tpLevelRefreshed = nil
-        -- Drop the previous occupant's pinned aura-identity (CLEU debuff GUID) and
-        -- aura colour override. Core clears these on OnNamePlateRemoved, but the
-        -- engine can RECYCLE a plate frame for a new mob without a detected remove
-        -- (C-side hide/show with no WorldFrame child-count change). When that mob
-        -- shares the previous one's name AND level, PinSignatureValid (name+level
-        -- only) still passes, so the recycled plate inherits the old mob's tracked
-        -- debuffs and colour - they "bleed" onto a same-named neighbour. Acquire is
-        -- the authoritative new-occupant signal, so reset here; a genuine re-bind
-        -- re-pins immediately via OnPlateBound.
+        -- Drop the previous occupant's aura colour override. Core clears pinnedGUID/
+        -- Name/Level on OnNamePlateRemoved; we must NOT clear them here because a
+        -- camera-pan hide/re-show goes through AcquirePlate WITHOUT a remove, and
+        -- the same mob is back. Clearing the pin would lose the GUID, causing
+        -- MergeTrackedDebuffs to fall back to name-only lookup and either show
+        -- wrong debuffs (bleed) or no debuffs at all (sap disappears). The bleed
+        -- guard in MergeTrackedDebuffs (CountPlatesWithName > 1) already prevents
+        -- same-name cross-plate bleed. _auraColorOverride is match-derived and
+        -- must be reset so a new match doesn't inherit a stale colour.
         local mp = blizzFrame.myPlate
         if mp then
-            mp.pinnedGUID        = nil
-            mp.pinnedName        = nil
-            mp.pinnedLevel       = nil
             mp._auraColorOverride = nil
         end
         -- Pooled plates are hidden/re-shown without a WorldFrame child-count change,
@@ -1676,6 +1682,15 @@ if not HAVE_NATIVE_ENGINE then
         end
     end)
 
+    -- awesome_wotlk DLL compatibility: if a partial native C_NamePlate already
+    -- exists (GetNamePlateForUnit present but no C_NamePlateManager), preserve
+    -- its GetNamePlateForUnit as a fallback so addons using native unit tokens
+    -- ("nameplate1" etc. from NAME_PLATE_UNIT_ADDED events) still resolve
+    -- correctly when our name-based cache hasn't caught up yet.
+    local _nativeGetNamePlateForUnit = (type(C_NamePlate) == "table"
+        and type(C_NamePlate.GetNamePlateForUnit) == "function")
+        and C_NamePlate.GetNamePlateForUnit or nil
+
     C_NamePlate = {}
     function C_NamePlate.GetNamePlateForUnit(unit)
         if not unit then return nil end
@@ -1696,6 +1711,9 @@ if not HAVE_NATIVE_ENGINE then
                 end
             end
         end
+        -- Last resort: if awesome_wotlk provided a native implementation, let it
+        -- resolve native unit tokens (e.g. "nameplate1") that our cache missed.
+        if _nativeGetNamePlateForUnit then return _nativeGetNamePlateForUnit(unit) end
         return nil
     end
     function C_NamePlate.GetNamePlates()
@@ -1792,7 +1810,8 @@ end
 
 ns.IS_WOTLK_COMPAT = not HAVE_NATIVE_ENGINE
 TurboPlatesWotlkCompat = {
-    active = not HAVE_NATIVE_ENGINE,
-    mode   = HAVE_NATIVE_ENGINE and "native" or "namebased-335",
-    note   = "Backported to stock 3.3.5a by Jedborg",
+    active         = not HAVE_NATIVE_ENGINE,
+    mode           = HAVE_NATIVE_ENGINE and "native" or "namebased-335",
+    awesomeWotlk   = HAVE_AWESOME_WOTLK or false,
+    note           = "Backported to stock 3.3.5a by Jedborg",
 }
