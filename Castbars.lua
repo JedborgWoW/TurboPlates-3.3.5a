@@ -611,8 +611,29 @@ end
 -- full display and clears the `scraped` flag.
 -------------------------------------------------------------------------------
 
+-- Position/show (or hide) the scraped spell icon. Icon comes from the Blizzard
+-- nameplate's own spell-icon region, so we have WHICH spell even with no unitID.
+local function ApplyScrapeIcon(castbar, icon)
+    if not (icon and GetShowCastIcon() and castbar.icon) then
+        if castbar.icon then castbar.icon:Hide() end
+        if castbar.iconBorder then castbar.iconBorder:Hide() end
+        return
+    end
+    castbar.icon:SetTexture(icon)
+    local iconSize = addon.c_castHeight or 12
+    PixelUtil.SetSize(castbar.icon, iconSize, iconSize, 1, 1)
+    castbar.icon:ClearAllPoints()
+    PixelUtil.SetPoint(castbar.icon, "RIGHT", castbar, "LEFT", -2, 0, 1, 1)
+    castbar.icon:Show()
+    if castbar.iconBorder then
+        castbar.iconBorder:ClearAllPoints()
+        castbar.iconBorder:SetAllPoints(castbar.icon)
+        castbar.iconBorder:Show()
+    end
+end
+
 -- Begin (or hand off to) a scrape-driven cast. `unit` is the plate token.
-function ns:ScrapeCastStart(unit, notInterruptible)
+function ns:ScrapeCastStart(unit, notInterruptible, icon)
     if not GetShowCastbar() then return end
     local plates = self.unitToPlate
     if not plates then return end
@@ -633,8 +654,7 @@ function ns:ScrapeCastStart(unit, notInterruptible)
     castbar:SetValue(0)
     castbar.spellText:SetText("")
     castbar.timeText:SetText("")
-    if castbar.icon then castbar.icon:Hide() end
-    if castbar.iconBorder then castbar.iconBorder:Hide() end
+    ApplyScrapeIcon(castbar, icon)
     if castbar.spark then castbar.spark:Hide() end
 
     if notInterruptible then
@@ -651,7 +671,7 @@ function ns:ScrapeCastStart(unit, notInterruptible)
 end
 
 -- Mirror the Blizzard bar's fill (0..1). Called every frame while scraping.
-function ns:ScrapeCastUpdate(unit, fill, notInterruptible)
+function ns:ScrapeCastUpdate(unit, fill, notInterruptible, icon)
     local plates = self.unitToPlate
     if not plates then return end
     local myPlate = plates[unit]
@@ -662,6 +682,12 @@ function ns:ScrapeCastUpdate(unit, fill, notInterruptible)
 
     if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
     castbar:SetValue(fill)
+
+    -- The engine may set the spell-icon texture a frame after the bar shows, so
+    -- apply it here too if it wasn't ready at start.
+    if icon and castbar.icon and not castbar.icon:IsShown() then
+        ApplyScrapeIcon(castbar, icon)
+    end
 
     if castbar.notInterruptible ~= notInterruptible then
         castbar.notInterruptible = notInterruptible

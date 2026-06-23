@@ -324,6 +324,16 @@ if not HAVE_NATIVE_ENGINE then
         blizzFrame._tpRaidIcon  = regions[10]
         blizzFrame._tpHealthBar = healthBar
         blizzFrame._tpCastBar   = castBar
+        -- Spell icon for the cast bar (region 5 in the canonical WotLK order, same
+        -- fixed-index approach as the raid icon above). Used to show WHICH spell an
+        -- untargeted mob is casting (NotPlater does the same). A wrong index from a
+        -- core with a different leading-texture count is harmless: it's suppressed
+        -- either way, and the read-time "is this an Interface\Icons path" check
+        -- rejects any non-icon texture so we never show garbage.
+        local spellIcon = regions[5]
+        if spellIcon and spellIcon.GetObjectType and spellIcon:GetObjectType() == "Texture" then
+            blizzFrame._tpSpellIcon = spellIcon
+        end
         HookPlateSources(blizzFrame, nameText, levelText, healthBar)
         blizzFrame._tpRefsCaptured = true
     end
@@ -1098,6 +1108,13 @@ if not HAVE_NATIVE_ENGINE then
                             if cr.Hide then cr:Hide() end
                         end
                     end
+                elseif child == blizzFrame._tpSpellIcon then
+                    -- Keep the spell icon PARENTED (do NOT reparent/clear) so the
+                    -- engine keeps writing the casting spell's texture into it in
+                    -- place - that's what lets us show WHICH spell an untargeted mob
+                    -- casts. Suppress it visually (Hide + Show-hook) so the Blizzard
+                    -- icon never leaks; we only read its texture (ProcessPlateCasts).
+                    SuppressRegion(child)
                 else
                     child:SetParent(blizzHiddenParent)
                     child:SetAlpha(0)
@@ -1302,11 +1319,22 @@ if not HAVE_NATIVE_ENGINE then
                 local val = cb:GetValue() or 0
                 local fill = 0
                 if maxv and minv and maxv > minv then fill = (val - minv) / (maxv - minv) end
+                -- Read the casting spell's icon off the (suppressed) Blizzard region.
+                -- Only accept an actual Interface\Icons path, so a mis-indexed region
+                -- on some core yields "no icon" rather than a stray UI texture.
+                local icon
+                local si = frame._tpSpellIcon
+                if si and si.GetTexture then
+                    local tex = si:GetTexture()
+                    if tex and type(tex) == "string" and tex:lower():find("icons", 1, true) then
+                        icon = tex
+                    end
+                end
                 if not frame._tpScraping then
                     frame._tpScraping = true
-                    ns:ScrapeCastStart(token, false)
+                    ns:ScrapeCastStart(token, false, icon)
                 end
-                ns:ScrapeCastUpdate(token, fill, false)
+                ns:ScrapeCastUpdate(token, fill, false, icon)
                 -- The engine may re-apply the bar texture per cast - keep it dropped
                 -- so no Blizzard cast art leaks next to our plate.
                 if cb.SetStatusBarTexture then cb:SetStatusBarTexture(nil) end
