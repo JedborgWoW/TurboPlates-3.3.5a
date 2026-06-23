@@ -661,7 +661,19 @@ end
 -- mob whose plate bound late stayed dimmed and unglowed. Re-sync those here.
 function ns.OnPlateBound(blizzFrame, realGUID)
     if not blizzFrame or not realGUID then return end
-    if blizzFrame.myPlate then blizzFrame.myPlate.cachedGUID = realGUID end
+    if blizzFrame.myPlate then
+        blizzFrame.myPlate.cachedGUID = realGUID
+        -- PIN the real GUID + a name/level signature onto the plate. cachedGUID
+        -- reverts to the synthetic guid on the next unbound FullPlateUpdate, so it
+        -- can't identify the mob once it stops being target/focus/mouseover. This
+        -- pin persists across unbind (cleared on recycle / signature break) so
+        -- CLEU-tracked debuffs can be shown on THIS specific mob by GUID instead of
+        -- by name-union (which bleeds onto same-named neighbours). Mirrors
+        -- NotPlater's frame.npGUID + signature approach (modules/aura).
+        blizzFrame.myPlate.pinnedGUID = realGUID
+        blizzFrame.myPlate.pinnedName = blizzFrame._tpName
+        blizzFrame.myPlate.pinnedLevel = blizzFrame._tpLevel
+    end
     if blizzFrame.liteContainer then blizzFrame.liteContainer.cachedGUID = realGUID end
     -- It just became identifiable as the target (real GUID now matches): fix glow/scale.
     if realGUID == ns.currentTargetGUID and ns.ValidateTargetPlate then

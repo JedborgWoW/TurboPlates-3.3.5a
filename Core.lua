@@ -1304,6 +1304,12 @@ OnNamePlateRemoved = function(_, unit, nameplate)
         end
         if nameplate.myPlate then
             nameplate.myPlate._auraColorOverride = nil
+            -- Drop the pinned aura-identity GUID so a recycled frame's next occupant
+            -- can't inherit the previous mob's CLEU-tracked debuffs. The name/level
+            -- signature also guards this, but clearing here covers same-name reuse.
+            nameplate.myPlate.pinnedGUID = nil
+            nameplate.myPlate.pinnedName = nil
+            nameplate.myPlate.pinnedLevel = nil
             -- Clear stale plate reference before recycling (keep GUID - target still exists)
             if nameplate.myPlate == ns.currentTargetPlate then
                 ns.currentTargetPlate = nil

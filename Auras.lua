@@ -9,6 +9,7 @@ local UnitExists = ns.UnitExists or UnitExists
 local UnitIsFriend = ns.UnitIsFriend or UnitIsFriend
 local UnitName = ns.UnitName or UnitName
 local UnitGUID = ns.UnitGUID or UnitGUID
+local UnitLevel = ns.UnitLevel or UnitLevel
 local GetTime = GetTime
 local GetSpellInfo = GetSpellInfo
 local pairs, ipairs = pairs, ipairs
@@ -55,6 +56,14 @@ local durationBySpell = {}  -- spellID -> duration, learned from UnitAura
 local playerGUID, petGUID
 local exclScratch = {}      -- reused: bound GUIDs to skip when merging
 local seenScratch = {}      -- reused: spellIDs already added (dedup across GUIDs)
+local reconcileSeen = {}    -- reused: spellIDs UnitAura reports on a bound unit
+local reconcileGUID = nil   -- set during a bound debuff pass to prune cleuByGUID
+-- Memory backstop for a tracked debuff whose REMOVED/BROKEN event was missed AND
+-- whose duration was never learned. Removal is normally event-driven; a bound
+-- UnitAura read (reconciliation) corrects it the instant you look at the mob, so
+-- this only bounds memory for a never-targeted mob - keep it generous so it can't
+-- prune a still-active long CC (the old 30s cap removed live Saps mid-duration).
+local CLEU_STALE_CAP = 300
 
 -- =============================================================================
 -- CREATE TEXTURE BORDER UTILITY (uses shared system from Nameplates.lua)
@@ -798,6 +807,14 @@ local function ProcessAuraCallback(name, rank, icon, count, debuffType, duration
         durationBySpell[spellID] = duration
     end
 
+    -- Reconciliation: while a bound unit's debuffs are being read, record every
+    -- harmful-player spell it actually has (before filtering) so the caller can
+    -- prune cleuByGUID entries UnitAura no longer reports - a broken/expired CC
+    -- whose REMOVED/BROKEN event we missed. The bound read is authoritative.
+    if reconcileGUID and currentAuraType == "debuff" and spellID then
+        reconcileSeen[spellID] = true
+    end
+
     -- Filter check (pass debuffType for Magic-type stealable fallback)
     if not PassesFilters(spellID, duration, canStealOrPurge, currentAuraType, debuffType) then
         return
@@ -990,18 +1007,17 @@ do
         end
 
         -- Whose applied debuffs to mirror: the player and the player's pet.
-        -- Also wipe the cache on leaving combat - DoTs are gone by then, and it
-        -- bounds memory / staleness.
+        -- NOTE: we deliberately do NOT wipe the cache on leaving combat. Sap (and
+        -- other CC) is applied OUT of combat and stays active after a nearby fight
+        -- ends; a PLAYER_REGEN_ENABLED wipe removed a still-active Sap mid-duration
+        -- (you'd see the icon vanish, then reappear only on re-target via UnitAura).
+        -- Memory + staleness are instead bounded by removal events, the bound-read
+        -- reconciliation, and the stale-cap sweep below.
         local guidFrame = CreateFrame("Frame")
         guidFrame:RegisterEvent("PLAYER_LOGIN")
         guidFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
         guidFrame:RegisterEvent("UNIT_PET")
-        guidFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         guidFrame:SetScript("OnEvent", function(_, ev, unit)
-            if ev == "PLAYER_REGEN_ENABLED" then
-                wipe(cleuByGUID) wipe(nameIndex)
-                return
-            end
             if ev == "UNIT_PET" and unit ~= "player" then return end
             playerGUID = UnitGUID("player")
             petGUID = UnitExists("pet") and UnitGUID("pet") or nil
@@ -1061,6 +1077,10 @@ do
                 if not s then s = {} g.spells[spellId] = s end
                 s.name = spellName
                 s.applied = GetTime()
+                -- Record pet-sourced so bound-read reconciliation skips it:
+                -- "HARMFUL|PLAYER" doesn't enumerate pet auras, so a present pet
+                -- debuff would otherwise be falsely pruned when you target the mob.
+                s.pet = (srcGUID == petGUID) or nil
                 if subevent == "SPELL_AURA_APPLIED_DOSE"
                    or subevent == "SPELL_AURA_REMOVED_DOSE" then
                     s.stacks = amount
@@ -1071,14 +1091,14 @@ do
             end
         end)
 
-        -- Safety-net sweep: prune tracked debuffs that are past their learned
-        -- duration (or a 30s cap when the duration was never learned) and redraw
-        -- the affected plates. Without this, a stale icon could linger forever:
-        -- the per-merge prune in MergeTrackedDebuffs only runs when something else
-        -- already triggered a refresh, and it's skipped for bound plates entirely,
-        -- so an entry whose REMOVE event was missed had nothing to clear it. This
-        -- prunes cleuByGUID directly (independent of bound/unbound display) so the
-        -- documented cap actually fires.
+        -- Safety-net sweep: prune tracked debuffs past their learned duration (or a
+        -- generous memory backstop when the duration was never learned) and redraw
+        -- the affected plates. Removal is normally event-driven (REMOVED/BROKEN) and
+        -- a bound UnitAura read reconciles the cache the instant you look at the mob;
+        -- this sweep only catches a tracked entry on a mob you never re-target whose
+        -- removal event was genuinely missed. The backstop is deliberately long
+        -- (CLEU_STALE_CAP) so it can't prune a still-active long CC the way the old
+        -- 30s cap removed live Saps mid-duration.
         local sweep = CreateFrame("Frame")
         local sweepAccum = 0
         sweep:SetScript("OnUpdate", function(_, elapsed)
@@ -1090,7 +1110,8 @@ do
                 local name, changed = g.name, false
                 for spellID, s in pairs(g.spells) do
                     local dur = durationBySpell[spellID]
-                    if (dur and s.applied + dur <= now) or (not dur and now - s.applied > 30) then
+                    if (dur and s.applied + dur <= now)
+                       or (not dur and now - s.applied > CLEU_STALE_CAP) then
                         if ForgetSpell(guid, spellID) then changed = true end
                     end
                 end
@@ -1100,20 +1121,114 @@ do
     end
 end
 
--- Merge combat-log-tracked player debuffs onto an UNBOUND plate (one with no
--- real unit token, so UnitAura returned nothing). Bound plates are left to
--- UnitAura, which is authoritative. We iterate the GUIDs known for this plate's
--- NAME but skip any GUID currently bound to a plate (target/focus/mouseover):
--- those auras already show on their own plate, and skipping them stops a
--- single-target DoT on your target from bleeding onto same-named neighbours.
--- Durations come from the learned cache; unknown -> timerless icon, with a 30s
--- safety cap so a missed SPELL_AURA_REMOVED can't leave a stale icon forever.
-local function MergeTrackedDebuffs(unit, collector)
+-- Drop a tracked GUID entirely (cleuByGUID + its nameIndex back-reference).
+local function DropTrackedGUID(guid)
+    local g = cleuByGUID[guid]
+    if not g then return end
+    cleuByGUID[guid] = nil
+    local idx = nameIndex[g.name]
+    if idx then
+        idx[guid] = nil
+        if not next(idx) then nameIndex[g.name] = nil end
+    end
+end
+
+-- Push one tracked spell into the collector (deduped, blacklist-filtered).
+local function AddTrackedSpell(collector, spellID, s, now, seen)
+    if seen[spellID] then return end
+    if ns.AuraBlacklist and rawget(ns.AuraBlacklist, spellID) then return end
+    seen[spellID] = true
+    local dur = durationBySpell[spellID]
+    local aura = AcquireAuraData()
+    aura.name = s.name
+    aura.icon = GetCachedIcon(spellID, nil)
+    aura.count = s.stacks or 0
+    aura.debuffType = nil
+    aura.duration = dur or 0
+    aura.expires = dur and (s.applied + dur) or 0
+    aura.canStealOrPurge = false
+    aura.spellID = spellID
+    aura.isDebuff = true
+    aura.timeLeft = aura.expires > 0 and (aura.expires - now) or 0
+    tinsert(collector, aura)
+end
+
+-- True when the plate still shows the same mob it was pinned to (name, plus level
+-- when both are known). Lets us trust pinnedGUID for an unbound plate.
+local function PinSignatureValid(myPlate, name, unit)
+    if not (myPlate and myPlate.pinnedGUID) then return false end
+    if myPlate.pinnedName ~= name then return false end
+    local pl = myPlate.pinnedLevel
+    if pl and pl > 0 then
+        local cl = UnitLevel(unit)
+        if cl and cl > 0 and cl ~= pl then return false end
+    end
+    return true
+end
+
+-- Count currently-visible enemy plates whose scraped name matches `name`. Gates
+-- the name-only fallback so a single-target debuff is only merged onto an
+-- UNIDENTIFIABLE plate when it's the UNIQUE plate of that name.
+local function CountPlatesWithName(name)
+    local mgr = C_NamePlateManager
+    if not (mgr and mgr.EnumerateActiveNamePlates) then return 0 end
+    local n = 0
+    for blizzFrame in mgr.EnumerateActiveNamePlates() do
+        local mp = blizzFrame.myPlate
+        if mp and not mp.isPlayer and mp.unit and UnitName(mp.unit) == name then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+-- Merge combat-log-tracked player debuffs onto an UNBOUND plate (no real unit
+-- token, so UnitAura returned nothing). Bound plates are left to UnitAura, which
+-- is authoritative.
+--
+-- PRIMARY - pinned GUID: if this plate was bound at least once and still shows the
+-- same mob (name/level signature), read THAT mob's tracked debuffs by GUID. This
+-- is exact - a single-target Sap shows only on the sapped mob, never bleeds onto a
+-- same-named neighbour, and matches what UnitAura showed while bound (no flicker
+-- across the bound<->unbound transition). Mirrors NotPlater's frame.npGUID design.
+--
+-- FALLBACK - name-only: a plate never bound (or recycled) has no usable pin. Merge
+-- by name ONLY when it's the unique visible plate of that name, so an ambiguous
+-- single-target debuff can't bleed onto a neighbour; a lone same-named add (or a
+-- true Pestilence spread, once each add is moused over and pinned) still shows.
+-- Ambiguous (>=2 same-named visible) -> show nothing.
+local function MergeTrackedDebuffs(myPlate, unit, collector)
     if not ns.IS_WOTLK_COMPAT then return end
     if ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit) then return end  -- bound
     local name = UnitName(unit)
-    local idx = name and nameIndex[name]
+    if not name then return end
+    local now = GetTime()
+    local seen = seenScratch
+    wipe(seen)
+
+    -- PRIMARY: pinned GUID. This plate is unbound, so its pin can't be the current
+    -- target's GUID (that would have bound it) - no exclusion needed.
+    if PinSignatureValid(myPlate, name, unit) then
+        local guid = myPlate.pinnedGUID
+        local g = cleuByGUID[guid]
+        if g then
+            for spellID, s in pairs(g.spells) do
+                local dur = durationBySpell[spellID]
+                if dur and s.applied + dur <= now then
+                    g.spells[spellID] = nil  -- learned duration elapsed
+                else
+                    AddTrackedSpell(collector, spellID, s, now, seen)
+                end
+            end
+            if not next(g.spells) then DropTrackedGUID(guid) end
+        end
+        return
+    end
+
+    -- FALLBACK: name-only, gated on uniqueness.
+    local idx = nameIndex[name]
     if not idx then return end
+    if CountPlatesWithName(name) > 1 then return end  -- ambiguous: show nothing
 
     local excl = exclScratch
     wipe(excl)
@@ -1121,31 +1236,15 @@ local function MergeTrackedDebuffs(unit, collector)
     local fg = UnitGUID("focus");     if fg then excl[fg] = true end
     local mg = UnitGUID("mouseover"); if mg then excl[mg] = true end
 
-    local seen = seenScratch
-    wipe(seen)
-    local now = GetTime()
     for guid in pairs(idx) do
         local g = (not excl[guid]) and cleuByGUID[guid]
         if g then
             for spellID, s in pairs(g.spells) do
                 local dur = durationBySpell[spellID]
-                if (dur and s.applied + dur <= now) or (not dur and now - s.applied > 30) then
-                    g.spells[spellID] = nil  -- expired / safety cap
-                elseif not seen[spellID]
-                       and not (ns.AuraBlacklist and rawget(ns.AuraBlacklist, spellID)) then
-                    seen[spellID] = true  -- dedup: same spell across several neighbours
-                    local aura = AcquireAuraData()
-                    aura.name = s.name
-                    aura.icon = GetCachedIcon(spellID, nil)
-                    aura.count = s.stacks or 0
-                    aura.debuffType = nil
-                    aura.duration = dur or 0
-                    aura.expires = dur and (s.applied + dur) or 0
-                    aura.canStealOrPurge = false
-                    aura.spellID = spellID
-                    aura.isDebuff = true
-                    aura.timeLeft = aura.expires > 0 and (aura.expires - now) or 0
-                    tinsert(collector, aura)
+                if dur and s.applied + dur <= now then
+                    g.spells[spellID] = nil  -- learned duration elapsed
+                else
+                    AddTrackedSpell(collector, spellID, s, now, seen)
                 end
             end
             if not next(g.spells) then  -- all pruned: drop the GUID
@@ -1258,10 +1357,39 @@ function ns:UpdateAuras(myPlate, unit)
         if ns.c_showDebuffs then
             currentAuraType = "debuff"
             currentCollector = debuffCollector
+
+            -- When this plate is bound, the UnitAura read below is authoritative for
+            -- which of YOUR debuffs the mob still has. Arm reconciliation so any
+            -- player-sourced cleuByGUID entry UnitAura no longer reports (a broken or
+            -- expired CC whose REMOVED/BROKEN event we missed) is pruned now - looking
+            -- at the mob self-corrects the cache instead of waiting for the sweep.
+            -- Pet-sourced entries are excluded: "HARMFUL|PLAYER" doesn't list pet
+            -- auras, so reconcileSeen wouldn't see them (they'd be falsely pruned).
+            local realUnit = ns.GetPlateRealUnit and ns.GetPlateRealUnit(unit)
+            local rguid = realUnit and UnitGUID(realUnit)
+            if rguid and cleuByGUID[rguid] then
+                reconcileGUID = rguid
+                wipe(reconcileSeen)
+            end
+
             AuraUtil.ForEachAura(unit, "HARMFUL|PLAYER", 40, ProcessAuraCallback)
+
+            if reconcileGUID then
+                local g = cleuByGUID[reconcileGUID]
+                if g then
+                    for spellID, s in pairs(g.spells) do
+                        if not reconcileSeen[spellID] and not s.pet then
+                            g.spells[spellID] = nil
+                        end
+                    end
+                    if not next(g.spells) then DropTrackedGUID(reconcileGUID) end
+                end
+                reconcileGUID = nil
+            end
+
             -- Add combat-log-tracked debuffs for plates with no real unit token
             -- (e.g. Pestilence-spread diseases on unbound adds). No-op when bound.
-            MergeTrackedDebuffs(unit, debuffCollector)
+            MergeTrackedDebuffs(myPlate, unit, debuffCollector)
             myPlate.debuffContainer:Show()
         else
             AuraPool:ReleaseAll(myPlate.debuffContainer)
