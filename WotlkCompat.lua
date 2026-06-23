@@ -490,7 +490,19 @@ if not HAVE_NATIVE_ENGINE then
             local cur = hb:GetValue()
             if cur ~= nil then
                 local _, mx = hb:GetMinMaxValues()
+                -- Fallback HP push: OnValueChanged is the primary driver, but some
+                -- private server implementations batch health updates and don't call
+                -- SetValue on every damage event, so the hook can miss hits. When the
+                -- scraped value here differs from the cache, the bar is stale; push the
+                -- update now. This runs every ~0.1s so the lag is imperceptible.
+                local hpChanged = (cur ~= frame._tpHP or mx ~= frame._tpHPMax)
                 frame._tpHP, frame._tpHPMax = cur, mx
+                if hpChanged then
+                    local tok = frame._tpToken
+                    if tok and frame._tpAnnounced and ns.UpdateNameplateHealth then
+                        ns.UpdateNameplateHealth(tok)
+                    end
+                end
             end
             if hb.GetStatusBarColor then
                 local key = ColorToReactionKey(hb:GetStatusBarColor())
