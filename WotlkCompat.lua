@@ -1770,6 +1770,45 @@ if not HAVE_NATIVE_ENGINE then
     function C_NamePlateManager.SetEnableResizeNamePlates() end
     _G.C_NamePlateManager = C_NamePlateManager
 
+    -- awesome_wotlk WeakAura sync ------------------------------------------
+    -- The DLL fires NAME_PLATE_UNIT_ADDED immediately when a plate appears.
+    -- WeakAuras anchored to the nameplate run their handler next in the SAME
+    -- event dispatch cycle. TurboPlates normally announces a plate ~0.1-0.5s
+    -- later (waiting for PlateAnnounceReady: name scraped + reaction stable).
+    -- When FireAdded fires late, FullPlateUpdate rescales the nameplate AFTER
+    -- the WeakAura has already anchored, so the WeakAura repositions. Fix:
+    -- register for NAME_PLATE_UNIT_ADDED first (TurboPlates loads before WAs),
+    -- pre-fill name + reaction from the native API so PlateAnnounceReady
+    -- passes immediately, and fire FireAdded right now. By the time the WA's
+    -- handler runs for the same event, FullPlateUpdate is already done and the
+    -- plate is in its final scaled state.
+    if HAVE_AWESOME_WOTLK and _nativeGetNamePlateForUnit then
+        local aweSyncFrame = CreateFrame("Frame")
+        aweSyncFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+        aweSyncFrame:SetScript("OnEvent", function(_, _, unit)
+            local blizzFrame = _nativeGetNamePlateForUnit(unit)
+            if not blizzFrame or not managedPlates[blizzFrame] then return end
+            if blizzFrame._tpAnnounced then return end
+            -- Pre-fill name from native API, bypassing the font-region scrape wait.
+            local name = _UnitName(unit)
+            if name and name ~= "" and name ~= "Unknown" then
+                blizzFrame._tpName = name
+            end
+            -- Pre-fill reaction from native API, bypassing color-stabilisation.
+            local friend = _UnitIsFriend("player", unit)
+            local canAtk = _UnitCanAttack("player", unit)
+            blizzFrame._tpReaction = friend and "friendly" or (canAtk and "hostile" or "neutral")
+            blizzFrame._tpReactionStable = 99  -- skip the 2-read stability gate
+            -- Announce immediately if ready.
+            if PlateAnnounceReady(blizzFrame) then
+                blizzFrame._tpAnnounced = true
+                blizzFrame._tpAnnouncedFriendly = PlateIsFriendly(blizzFrame)
+                FireAdded(blizzFrame._tpToken, blizzFrame)
+            end
+        end)
+    end
+    -- end awesome_wotlk WeakAura sync --------------------------------------
+
     function ns.GetResolvedNameplateUnit(blizzFrame)
         return blizzFrame and blizzFrame._unit or nil
     end
