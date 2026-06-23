@@ -566,7 +566,14 @@ if not HAVE_NATIVE_ENGINE then
             RefreshPlateScrape(frame)
             local u = frame._tpMatchedUnit
             if u and not PlateStillMatchesUnit(frame, u) then
+                local tok = frame._tpToken
                 ReleaseMatch(frame)
+                -- Reset the health bar colour: the plate may have been coloured
+                -- by threat data from the now-gone match (e.g. moused over briefly
+                -- → status=0 → DPS-secure magenta). UpdateColor is not triggered
+                -- automatically on release, so the stale colour would persist
+                -- until the next aura/health/target event hits this plate.
+                if tok and ns.UpdateColor then ns.UpdateColor(tok) end
             end
         end
         -- Correct a premature "target" binding: if the currently bound plate is
@@ -592,7 +599,9 @@ if not HAVE_NATIVE_ENGINE then
                         local fl = PlateLevel(frame)
                         if not (fl and tLvl and tLvl > 0 and fl ~= tLvl) then
                             if (frame.GetAlpha and frame:GetAlpha() or 1.0) >= 0.99 then
+                                local tfTok = tf._tpToken
                                 ReleaseMatch(tf)
+                                if tfTok and ns.UpdateColor then ns.UpdateColor(tfTok) end
                             end
                             break
                         end
