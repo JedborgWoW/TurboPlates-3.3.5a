@@ -675,6 +675,11 @@ function ns.OnPlateBound(blizzFrame, realGUID)
         if a ~= plate:GetAlpha() then plate:SetAlpha(a) end
     end
     if blizzFrame._tpToken and ns.UpdateRaidIcon then ns.UpdateRaidIcon(blizzFrame._tpToken) end
+    -- Binding gives us the real unit, so the quest tooltip scan can finally run here.
+    -- This is what makes MOUSING OVER (or targeting) a quest mob learn it - the icon
+    -- update otherwise only fires on FullPlateUpdate / QUEST_LOG_UPDATE, never on a
+    -- plain mouseover, so item-drop quest mobs were never learned from a hover.
+    if blizzFrame._tpToken and ns.UpdateQuestIcon then ns.UpdateQuestIcon(blizzFrame._tpToken) end
 end
 
 -- Arena detection for arena-specific features
@@ -5173,7 +5178,7 @@ local function UpdateQuestIcon(unit)
     -- same-type mobs ended up with DIFFERENT icon sizes. Use a fixed base size so
     -- every quest icon is uniform (scale is the user's questIconScale setting).
     myPlate.questIcon:SetAtlas(atlas or "questnormal", true)
-    local base = 32
+    local base = 24
     local scale = ns.c_questIconScale * 0.5  -- Match Ascension's internal scaling (* 0.5)
     myPlate.questIcon:SetSize(base * scale, base * scale)
     myPlate.questIcon._origW, myPlate.questIcon._origH = base, base
@@ -5296,7 +5301,7 @@ local function UpdateLiteQuestIcon(nameplate, unit)
     -- Apply atlas texture. Fixed base size - UseAtlasSize/GetSize is unreliable on
     -- this client and gave inconsistent icon sizes (see UpdateQuestIcon).
     icon:SetAtlas(atlas or "questnormal", true)
-    local base = 32
+    local base = 24
     local scale = ns.c_questIconScale * 0.5
     icon:SetSize(base * scale, base * scale)
 
