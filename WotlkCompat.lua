@@ -1265,6 +1265,15 @@ if not HAVE_NATIVE_ENGINE then
 
     local visible = {}
     local knownPlates = {}   -- every WorldFrame child ever confirmed a nameplate (the pool)
+    -- Spell NAME for untargeted casts: the Blizzard nameplate exposes the cast
+    -- bar + icon but NOT the spell name (it never renders one), so there's nothing
+    -- to scrape for the name. The combat log does have it though - SPELL_CAST_START
+    -- fires for EVERY caster in range (no unitID needed) with the spell id/name.
+    -- Cache name+icon keyed by caster NAME; the scrape (cb:IsShown) tells us WHICH
+    -- same-named plate is actually casting, so name-keying is enough to disambiguate.
+    -- [caster name] = { name = spell, icon = tex, t = GetTime() }
+    local castInfoByName = {}
+    local CAST_INFO_TTL = 12   -- drop stale entries so a new cast we missed can't show an old name
     local function ScanWorldFrame()
         wipe(visible)
         local kids = { WorldFrame:GetChildren() }
@@ -1330,11 +1339,23 @@ if not HAVE_NATIVE_ENGINE then
                         icon = tex
                     end
                 end
+                -- Spell NAME (and a cleaner icon) from the combat-log cache, matched
+                -- by this plate's name. The scrape already told us THIS plate is the
+                -- one casting, so a same-named neighbour won't steal the name.
+                local spellName
+                local pname = PlateName(frame)
+                local info = pname and castInfoByName[pname]
+                if info and (GetTime() - info.t) <= CAST_INFO_TTL then
+                    spellName = info.name
+                    -- Scraped icon is per-plate (always the right mob); only fall
+                    -- back to the combat-log icon if the region gave us nothing.
+                    if not icon and info.icon then icon = info.icon end
+                end
                 if not frame._tpScraping then
                     frame._tpScraping = true
-                    ns:ScrapeCastStart(token, false, icon)
+                    ns:ScrapeCastStart(token, false, icon, spellName)
                 end
-                ns:ScrapeCastUpdate(token, fill, false, icon)
+                ns:ScrapeCastUpdate(token, fill, false, icon, spellName)
                 -- The engine may re-apply the bar texture per cast - keep it dropped
                 -- so no Blizzard cast art leaks next to our plate.
                 if cb.SetStatusBarTexture then cb:SetStatusBarTexture(nil) end
@@ -1458,13 +1479,26 @@ if not HAVE_NATIVE_ENGINE then
     local clog = CreateFrame("Frame")
     clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     -- 3.3.5a CLEU payload (after self,event): timestamp, subevent, srcGUID,
-    -- srcName, srcFlags, dstGUID, dstName, dstFlags (no raid flags on this core).
-    clog:SetScript("OnEvent", function(_, _, _, _, srcGUID, srcName, srcFlags, destGUID, destName, destFlags)
+    -- srcName, srcFlags, dstGUID, dstName, dstFlags (no raid flags on this core),
+    -- then event-specific args. For SPELL_CAST_START: spellId, spellName, school.
+    clog:SetScript("OnEvent", function(_, _, _, subevent, srcGUID, srcName, srcFlags, destGUID, destName, destFlags, spellId, spellName)
         if srcName and srcFlags then
             isPlayerCache[srcName] = (bit.band(srcFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
         end
         if destName and destFlags then
             isPlayerCache[destName] = (bit.band(destFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+        end
+        -- Capture the spell NAME of any cast in range so untargeted nameplates can
+        -- show it (the scrape gives the bar + which plate, this gives the name).
+        if subevent == "SPELL_CAST_START" and srcName and spellName then
+            -- Prefer the spell's real icon (and confirm the name) via GetSpellInfo;
+            -- it's nil-safe for unknown/private-server ids and never crashes (unlike
+            -- SetSpellByID). Fall back to the combat-log name + scraped icon.
+            local giName, _, giIcon = GetSpellInfo(spellId)
+            castInfoByName[srcName] = { name = giName or spellName, icon = giIcon, t = GetTime() }
+        elseif (subevent == "SPELL_CAST_SUCCESS" or subevent == "SPELL_CAST_FAILED"
+                or subevent == "SPELL_INTERRUPT") and srcName then
+            castInfoByName[srcName] = nil
         end
     end)
 

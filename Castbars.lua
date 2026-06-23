@@ -633,7 +633,7 @@ local function ApplyScrapeIcon(castbar, icon)
 end
 
 -- Begin (or hand off to) a scrape-driven cast. `unit` is the plate token.
-function ns:ScrapeCastStart(unit, notInterruptible, icon)
+function ns:ScrapeCastStart(unit, notInterruptible, icon, spellName)
     if not GetShowCastbar() then return end
     local plates = self.unitToPlate
     if not plates then return end
@@ -646,13 +646,13 @@ function ns:ScrapeCastStart(unit, notInterruptible, icon)
     castbar.casting = nil
     castbar.channeling = nil
     castbar.castID = nil
-    castbar.spellName = nil
+    castbar.spellName = spellName
     castbar.holdTime = 0
     castbar.notInterruptible = notInterruptible
 
     castbar:SetMinMaxValues(0, 1)
     castbar:SetValue(0)
-    castbar.spellText:SetText("")
+    castbar.spellText:SetText(spellName or "")
     castbar.timeText:SetText("")
     ApplyScrapeIcon(castbar, icon)
     if castbar.spark then castbar.spark:Hide() end
@@ -671,7 +671,7 @@ function ns:ScrapeCastStart(unit, notInterruptible, icon)
 end
 
 -- Mirror the Blizzard bar's fill (0..1). Called every frame while scraping.
-function ns:ScrapeCastUpdate(unit, fill, notInterruptible, icon)
+function ns:ScrapeCastUpdate(unit, fill, notInterruptible, icon, spellName)
     local plates = self.unitToPlate
     if not plates then return end
     local myPlate = plates[unit]
@@ -682,6 +682,13 @@ function ns:ScrapeCastUpdate(unit, fill, notInterruptible, icon)
 
     if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
     castbar:SetValue(fill)
+
+    -- The combat-log name can arrive a frame after the bar shows; fill it in when
+    -- it does (and update if the mob started a different cast).
+    if spellName and castbar.spellName ~= spellName then
+        castbar.spellName = spellName
+        castbar.spellText:SetText(spellName)
+    end
 
     -- The engine may set the spell-icon texture a frame after the bar shows, so
     -- apply it here too if it wasn't ready at start.
