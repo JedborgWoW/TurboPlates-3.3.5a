@@ -696,6 +696,26 @@ function ns.OnPlateBound(blizzFrame, realGUID)
     -- was ALREADY mid-cast when we targeted/focused/moused-over it, no fresh
     -- UNIT_SPELLCAST_START will fire - so pick up the in-progress cast here.
     if blizzFrame._tpToken and ns.CheckExistingCast then ns:CheckExistingCast(blizzFrame._tpToken) end
+    -- ROOT bind-time re-sync. Plates render (FullPlateUpdate) BEFORE the match binds
+    -- (rule 8: announce on show), so everything that needs the REAL unit was computed
+    -- against a synthetic token, and nothing refreshes it once the unit resolves - no
+    -- event fires for state that was already present (an applied aura, an existing
+    -- elite classification, a standing threat). THIS hook is the single authoritative
+    -- "real unit now available" point: every real-unit-dependent consumer must
+    -- refresh here, not only on show. Scraped data (name/level/health/colour, rule 2)
+    -- is intentionally absent - it comes from the plate's own regions, not the unit.
+    -- The raid/quest/cast refreshes above are the same mechanism; auras (+ the
+    -- aura-driven colour override done inside UpdateAuras), the priority debuff,
+    -- classification and threat are the rest. Each one caused a real bug while it was
+    -- only computed on show: invisible Sap on a re-shown target, missing elite border,
+    -- stale threat text. New unit-dependent features belong HERE too.
+    local mp = blizzFrame.myPlate
+    if mp and mp.unit then
+        if ns.UpdateAuras then ns:UpdateAuras(mp, mp.unit) end
+        if ns.UpdateTurboDebuff then ns:UpdateTurboDebuff(mp, mp.unit) end
+        if ns.UpdateClassificationIndicator then ns.UpdateClassificationIndicator(mp.unit) end
+        if ns.UpdateThreatText then ns.UpdateThreatText(mp.unit, mp) end
+    end
 end
 
 -- Arena detection for arena-specific features

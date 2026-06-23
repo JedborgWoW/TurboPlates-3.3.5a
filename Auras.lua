@@ -54,7 +54,6 @@ local cleuByGUID = {}       -- [destGUID] = { name=, spells = { [spellID]={name,
 local nameIndex = {}        -- [destName] = { [destGUID]=true }  (reverse lookup)
 local durationBySpell = {}  -- spellID -> duration, learned from UnitAura
 local playerGUID, petGUID
-local exclScratch = {}      -- reused: bound GUIDs to skip when merging
 local seenScratch = {}      -- reused: spellIDs already added (dedup across GUIDs)
 local reconcileSeen = {}    -- reused: spellIDs UnitAura reports on a bound unit
 local reconcileGUID = nil   -- set during a bound debuff pass to prune cleuByGUID
@@ -1225,19 +1224,20 @@ local function MergeTrackedDebuffs(myPlate, unit, collector)
         return
     end
 
-    -- FALLBACK: name-only, gated on uniqueness.
+    -- FALLBACK: name-only, and ONLY for the unique visible plate of this name (so a
+    -- single-target debuff can't bleed onto a neighbour). Because it's unique there
+    -- is no same-named neighbour to bleed to, so we deliberately do NOT exclude the
+    -- target/focus/mouseover GUID here: excluding it hid a unique mob's OWN debuff
+    -- while its plate was momentarily unbound (look away from a sapped target and
+    -- back -> the re-shown plate is the target but not yet re-bound -> UnitAura
+    -- silent + the target GUID excluded -> the Sap vanished). A target with a
+    -- DIFFERENT name isn't in this name's index, so showing all GUIDs here is safe.
     local idx = nameIndex[name]
     if not idx then return end
     if CountPlatesWithName(name) > 1 then return end  -- ambiguous: show nothing
 
-    local excl = exclScratch
-    wipe(excl)
-    local tg = UnitGUID("target");    if tg then excl[tg] = true end
-    local fg = UnitGUID("focus");     if fg then excl[fg] = true end
-    local mg = UnitGUID("mouseover"); if mg then excl[mg] = true end
-
     for guid in pairs(idx) do
-        local g = (not excl[guid]) and cleuByGUID[guid]
+        local g = cleuByGUID[guid]
         if g then
             for spellID, s in pairs(g.spells) do
                 local dur = durationBySpell[spellID]
@@ -1251,7 +1251,7 @@ local function MergeTrackedDebuffs(myPlate, unit, collector)
                 cleuByGUID[guid] = nil
                 idx[guid] = nil
             end
-        elseif not excl[guid] then
+        else
             idx[guid] = nil  -- stale index entry (GUID no longer tracked)
         end
     end
