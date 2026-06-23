@@ -1309,7 +1309,6 @@ if not HAVE_NATIVE_ENGINE then
     -- cache. entry = { name, icon, start, duration, srcName, guid }
     local castInfoByName = {}  -- [caster name] = entry  (last caster of that name)
     local castByGUID = {}      -- [caster GUID] = entry
-    local castNameCount = {}   -- scratch: count of visible unbound plates per name
     local lastCastSweep = 0    -- throttle for the stale-entry sweep below
     local CAST_GRACE = 0.5     -- keep the bar this long past the estimated cast time
                                -- (haste makes the real cast shorter; the end event
@@ -1364,9 +1363,9 @@ if not HAVE_NATIVE_ENGINE then
     -- answer only for target/focus/mouseover/party/raid (the event-driven path in
     -- Castbars.lua handles those), and the engine doesn't drive the Blizzard nameplate
     -- cast bar to scrape. We self-animate from start + base cast time; the real end
-    -- event (or the grace cap) hides it. Identity matches the debuff system: the
-    -- plate's pinned GUID first, else name but ONLY for the unique plate of that name
-    -- (so a cast can't bleed onto a same-named neighbour). Runs every frame.
+    -- event (or the grace cap) hides it. Identity: the plate's pinned GUID first
+    -- (exact), else the caster name shown on every same-named plate (see the fallback
+    -- comment below for why casts differ from debuffs here). Runs every frame.
     local function ProcessPlateCasts()
         if not (ns.ScrapeCastStart and ns.ScrapeCastUpdate and ns.ScrapeCastStop) then return end
         local now = GetTime()
@@ -1377,15 +1376,6 @@ if not HAVE_NATIVE_ENGINE then
             lastCastSweep = now
             for _, e in pairs(castByGUID) do
                 if now - e.start > e.duration + CAST_GRACE then ClearCastEntry(e) end
-            end
-        end
-        -- One pass to count visible unbound plates per scraped name (uniqueness gate).
-        wipe(castNameCount)
-        for frame in pairs(knownPlates) do
-            if frame:IsShown() and managedPlates[frame] and frame._tpAnnounced
-               and not frame._tpMatchedUnit then
-                local nm = PlateName(frame)
-                if nm then castNameCount[nm] = (castNameCount[nm] or 0) + 1 end
             end
         end
         for frame in pairs(knownPlates) do
@@ -1401,12 +1391,19 @@ if not HAVE_NATIVE_ENGINE then
             if active and not frame._tpMatchedUnit then
                 local mp = frame.myPlate
                 local pname = PlateName(frame)
-                -- PRIMARY: this plate's pinned GUID, when it still shows that mob.
+                -- PRIMARY: this plate's pinned GUID, when it still shows that mob -
+                -- the exact caster, even if two same-named mobs cast different spells.
                 local pg = mp and mp.pinnedGUID
                 if pg and castByGUID[pg] and mp.pinnedName == pname then
                     info = castByGUID[pg]
-                elseif pname and castNameCount[pname] == 1 then
-                    -- FALLBACK: name, only when this is the unique plate of that name.
+                elseif pname then
+                    -- FALLBACK: name. Unlike debuffs (persistent, so a wrong neighbour
+                    -- is misleading), a cast is transient and the warning value of
+                    -- "something here is casting X" matters more than pinning the exact
+                    -- plate - so show it on EVERY same-named plate when we can't tell
+                    -- which is the caster (no pinned GUID). The combat log gives no
+                    -- plate->GUID for an unbound mob on stock 3.3.5a, so this is as
+                    -- precise as it gets; the real end event clears all of them.
                     info = castInfoByName[pname]
                 end
                 -- Past the estimated cast time with no end event: treat as stale and
