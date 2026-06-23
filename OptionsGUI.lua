@@ -1553,6 +1553,11 @@ local function CreateDropdown(parent, var, label, options, x, y, callback)
 
     for i, opt in ipairs(options) do
         local optBtn = CreateFrame("Button", nil, list)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 puts the text on top.
+        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
         optBtn:SetSize(214, optionHeight)
         optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * itemHeight)
 
@@ -1705,6 +1710,11 @@ local function CreateLanguageDropdown(parent, x, y)
 
     for i, opt in ipairs(options) do
         local optBtn = CreateFrame("Button", nil, list)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 puts the text on top.
+        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
         optBtn:SetSize(width - 6, 18)
         optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
         optBtn.value = opt.value
@@ -3875,6 +3885,14 @@ function ns:ToggleGUI()
 
         for i, opt in ipairs(options) do
             local optBtn = CreateFrame("Button", nil, list)
+            -- Raise above the list's opaque background (see CreateDropdown): child
+            -- text was rendering behind the parent BACKGROUND on this client.
+            optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 puts the text on top.
+        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
             optBtn:SetSize(214, 18)
             optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
@@ -4386,6 +4404,14 @@ function ns:ToggleGUI()
 
         for i, opt in ipairs(options) do
             local optBtn = CreateFrame("Button", nil, list)
+            -- Raise above the list's opaque background (see CreateDropdown): child
+            -- text was rendering behind the parent BACKGROUND on this client.
+            optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 puts the text on top.
+        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
             optBtn:SetSize(214, 18)
             optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
@@ -5329,6 +5355,14 @@ function ns:ToggleGUI()
 
         for i, opt in ipairs(options) do
             local optBtn = CreateFrame("Button", nil, list)
+            -- Raise above the list's opaque background (see CreateDropdown): child
+            -- text was rendering behind the parent BACKGROUND on this client.
+            optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 puts the text on top.
+        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
             optBtn:SetSize(214, 18)
             optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
