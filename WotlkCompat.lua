@@ -598,9 +598,10 @@ if not HAVE_NATIVE_ENGINE then
                 -- mob you just opened on) it's unambiguous, so remember it and bind
                 -- after the scan. With two identical full-HP mobs we leave it
                 -- unbound rather than risk binding (and glowing) the wrong one -
-                -- health resolves it the instant either takes damage. (Don't use
-                -- plate alpha to disambiguate: with non-target dimming off, every
-                -- plate reads full alpha, so it would pick an arbitrary one.)
+                -- health resolves it the instant either takes damage. (Raw alpha
+                -- can't disambiguate the general case: with non-target dimming off
+                -- every plate reads full alpha, so it would pick an arbitrary one -
+                -- but see the UNIQUE-alpha "target" exception after the loop.)
                 local fullHpFrame, fullHpAmbiguous = nil, false
                 for c = 1, nCand do
                     local frame = candFrame[c]
@@ -626,6 +627,39 @@ if not HAVE_NATIVE_ENGINE then
                 if fullHpFrame and not fullHpAmbiguous
                    and not matchUnitToPlate[unit] then
                     SetMatch(fullHpFrame, unit)
+                end
+                -- Same-named full-HP mobs are ambiguous by health (above), so left
+                -- unbound. But for the TARGET the client renders the real target's
+                -- plate at full alpha and dims the rest, so disambiguate by alpha
+                -- when it's UNIQUE. Gate on uniqueness so non-target dimming OFF
+                -- (every plate full alpha) still leaves it unbound rather than
+                -- binding an arbitrary one (the reason raw alpha was rejected for the
+                -- general full-HP case). Only "target" gets engine target-dimming, so
+                -- restrict to it - focus/mouseover alpha is uniform. Binding the
+                -- target here is what makes UnitAura (Sap timer), the pinned-GUID
+                -- debuff path, target scale and glow all work for a sapped same-named
+                -- twin instead of it staying unbound.
+                if fullHpAmbiguous and unit == "target"
+                   and not matchUnitToPlate[unit] then
+                    local alphaFrame, alphaAmbiguous = nil, false
+                    for c = 1, nCand do
+                        local frame = candFrame[c]
+                        if frame and not frame._tpMatchedUnit
+                           and candName[c] == uName then
+                            local lvl = candLvl[c]
+                            if not (lvl and uLvl and uLvl > 0 and lvl ~= uLvl) then
+                                local cur, max = candCur[c], candMax[c]
+                                if cur ~= nil and not uIsPlr and max and cur == max
+                                   and frame.GetAlpha and frame:GetAlpha() >= 0.99 then
+                                    if alphaFrame then alphaAmbiguous = true
+                                    else alphaFrame = frame end
+                                end
+                            end
+                        end
+                    end
+                    if alphaFrame and not alphaAmbiguous then
+                        SetMatch(alphaFrame, unit)
+                    end
                 end
             end
         end

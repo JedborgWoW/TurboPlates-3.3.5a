@@ -4539,7 +4539,18 @@ local function ValidateTargetPlate()
     if ns.currentTargetPlate then
         local unit = ns.currentTargetPlate.unit
         local plateGUID = unit and UnitGUID(unit)
-        if plateGUID == ns.currentTargetGUID then
+        -- Still valid if the GUID matches, OR it's still alpha-identified as the
+        -- target. The alpha fallback covers a target the match tracker can't bind by
+        -- GUID: two+ same-named mobs at full HP are deliberately left UNBOUND (rule
+        -- 5), so UnitGUID(token) returns the synthetic guid and never equals
+        -- currentTargetGUID. FullPlateUpdate still scales+tracks that plate from
+        -- alpha (the engine dims non-targets); without this, ValidateTargetPlate -
+        -- which runs right after FullPlateUpdate in OnNamePlateAdded - would null the
+        -- correct currentTargetPlate, orphaning the target-scaled plate so detarget
+        -- has no reference to reset it (repro: target a mob before its plate appears,
+        -- next to a same-named twin -> plate stays enlarged).
+        if plateGUID == ns.currentTargetGUID
+           or (unit and UnitExists("target") and UnitIsUnit(unit, "target")) then
             return -- Still valid, no action needed
         end
         -- Mismatch detected - remove effects from wrong plate
