@@ -4901,6 +4901,12 @@ local questObjectiveTexts = {}
 local questObjectiveKeys = {}
 local questNameMatchCache = {}
 local questCacheDirty = true
+-- [mobName] = objectiveKey learned from a tooltip scan of a BOUND mob. Item-drop
+-- quests name the ITEM in the objective ("Highland Raptor Eye"), not the mob, so
+-- name match can't find them - but once we've seen ONE of a mob type as a quest
+-- target via its tooltip, every same-named plate is one too (they all drop it).
+-- Gated by questObjectiveKeys so it self-invalidates when the objective is done.
+local learnedQuestMobs = {}
 ns.InvalidateQuestCache = function() questCacheDirty = true end
 
 -- Strip a trailing " : x/y" progress and a leading dash/bullet so the same
@@ -4942,10 +4948,14 @@ end
 -- (a "!" on a mob you have no quest for). Catches use-item/interact quests where
 -- the mob name isn't in the objective text (the tooltip still shows the progress).
 local questScanTip
-local function UnitTooltipHasQuestObjective(realUnit)
-    if not realUnit then return false end
+-- Returns the matched objective KEY (normalised) if the unit's tooltip shows an
+-- in-progress objective (x/y, x<y) that's in OUR quest log, else nil. The quest-log
+-- cross-check matters: other addons (Questie, drop trackers) inject "x/y" lines into
+-- unit tooltips, which would false-positive otherwise (a "!" on a non-quest mob).
+local function UnitTooltipQuestKey(realUnit)
+    if not realUnit then return nil end
     if questCacheDirty then RebuildQuestObjectiveCache() end
-    if not next(questObjectiveKeys) then return false end  -- no active objectives
+    if not next(questObjectiveKeys) then return nil end  -- no active objectives
     if not questScanTip then
         questScanTip = CreateFrame("GameTooltip", "TurboPlatesQuestScanTip", UIParent, "GameTooltipTemplate")
     end
@@ -4954,9 +4964,9 @@ local function UnitTooltipHasQuestObjective(realUnit)
     -- pcall: SetUnit on an unexpected token shouldn't error out the caller.
     if not pcall(questScanTip.SetUnit, questScanTip, realUnit) then
         questScanTip:Hide()
-        return false
+        return nil
     end
-    local found = false
+    local key
     for i = 2, (questScanTip:NumLines() or 0) do  -- line 1 is the unit name
         local fs = _G["TurboPlatesQuestScanTipTextLeft" .. i]
         local text = fs and fs:GetText()
@@ -4964,16 +4974,16 @@ local function UnitTooltipHasQuestObjective(realUnit)
             local cur, total = strmatch(text, "(%d+)%s*/%s*(%d+)")
             if cur then
                 cur, total = tonumber(cur), tonumber(total)
-                if cur and total and total > 0 and cur < total
-                   and questObjectiveKeys[NormalizeObjective(text)] then
-                    found = true
+                local k = (cur and total and total > 0 and cur < total) and NormalizeObjective(text)
+                if k and questObjectiveKeys[k] then
+                    key = k
                     break
                 end
             end
         end
     end
     questScanTip:Hide()
-    return found
+    return key
 end
 
 -- (3) Name match: a plate is a quest target if its name is a substring of an
@@ -5004,11 +5014,33 @@ function ns.GetPlateQuestInfo(plateUnit)
     else
         realUnit = plateUnit
     end
-    if realUnit and UnitTooltipHasQuestObjective(realUnit) then
+    local name = UnitName(plateUnit)
+    if realUnit then
+        local key = UnitTooltipQuestKey(realUnit)
+        if key then
+            if name and learnedQuestMobs[name] ~= key then
+                learnedQuestMobs[name] = key  -- learn the mob type
+                -- Newly learned: refresh all plates so same-named UNBOUND ones show
+                -- the icon now (deferred to avoid recursing through
+                -- UpdateAllQuestIcons -> UpdateQuestIcon -> here).
+                if C_Timer_After and ns.UpdateAllQuestIcons then
+                    C_Timer_After(0, ns.UpdateAllQuestIcons)
+                end
+            end
+            return "objective"
+        end
+    end
+    if name and PlateNameMatchesQuest(name) then
         return "objective"
     end
-    if PlateNameMatchesQuest(UnitName(plateUnit)) then
-        return "objective"
+    -- Item-drop quest (objective names the item, not the mob): show on every
+    -- same-named plate once we've learned one via tooltip, while the objective is
+    -- still active (PlateNameMatchesQuest above already refreshed the cache).
+    if name then
+        local lk = learnedQuestMobs[name]
+        if lk and questObjectiveKeys[lk] then
+            return "objective"
+        end
     end
     return nil
 end
