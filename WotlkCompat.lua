@@ -425,12 +425,12 @@ if not HAVE_NATIVE_ENGINE then
         if unit then
             matchUnitToPlate[unit] = blizzFrame
             CacheUnitByName(unit)
-            -- The plate just gained its real unit. Re-read its raid marker now: a
-            -- marker placed before the plate existed (e.g. on a full-HP target, which
-            -- binds here via UpdateMatches rather than at acquire) was read as nil by
-            -- FullPlateUpdate pre-bind, and RAID_TARGET_UPDATE won't fire again.
-            if blizzFrame._tpAnnounced and ns.UpdateRaidIcon then
-                ns.UpdateRaidIcon(blizzFrame._tpToken)
+            -- The plate just gained its real unit. Plates announce on show (before the
+            -- match binds), so GUID-dependent state set at announce used the synthetic
+            -- guid - re-sync it now: target dimming/glow/scale and the raid marker (a
+            -- marker or target set before the plate existed is otherwise missed).
+            if blizzFrame._tpAnnounced and ns.OnPlateBound then
+                ns.OnPlateBound(blizzFrame, blizzFrame._tpMatchedGUID)
             end
         end
     end

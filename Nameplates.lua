@@ -654,6 +654,29 @@ function ns.UpdateNameplateAlphas(reason)
     end
 end
 
+-- Called by the compat layer the instant a plate binds to its real unit. Plates now
+-- announce on show (before the match establishes), so the GUID-dependent state set at
+-- announce used the SYNTHETIC guid: cachedGUID drives target dimming
+-- (ResolveNameplateAlpha) and target glow/scale (GetPlateByGUID), so a just-targeted
+-- mob whose plate bound late stayed dimmed and unglowed. Re-sync those here.
+function ns.OnPlateBound(blizzFrame, realGUID)
+    if not blizzFrame or not realGUID then return end
+    if blizzFrame.myPlate then blizzFrame.myPlate.cachedGUID = realGUID end
+    if blizzFrame.liteContainer then blizzFrame.liteContainer.cachedGUID = realGUID end
+    -- It just became identifiable as the target (real GUID now matches): fix glow/scale.
+    if realGUID == ns.currentTargetGUID and ns.ValidateTargetPlate then
+        ns.ValidateTargetPlate()
+    end
+    -- Re-apply this plate's alpha so a just-bound target stops being dimmed like a
+    -- non-target (and a bound non-target gets correctly dimmed).
+    local plate = (blizzFrame._isLite and blizzFrame.liteContainer) or blizzFrame.myPlate
+    if plate and not plate.isPlayer and ns.ResolveNameplateAlpha then
+        local a = ns.ResolveNameplateAlpha(plate, blizzFrame:GetAlpha(), "bind")
+        if a ~= plate:GetAlpha() then plate:SetAlpha(a) end
+    end
+    if blizzFrame._tpToken and ns.UpdateRaidIcon then ns.UpdateRaidIcon(blizzFrame._tpToken) end
+end
+
 -- Arena detection for arena-specific features
 local inArena = false
 local IsInInstance = IsInInstance
