@@ -5172,12 +5172,11 @@ local function UpdateQuestIcon(unit)
     -- Override kill objective icon
     if atlas == "questkill" then atlas = "tormentors-boss" end
 
-    -- Apply atlas texture. SetAtlas(...,true) is meant to size the icon to the atlas,
-    -- but ClassicAPI's SetAtlas doesn't reliably honour UseAtlasSize on 3.3.5a - so
-    -- GetSize() returned either the real atlas size or the 16px creation default, and
-    -- same-type mobs ended up with DIFFERENT icon sizes. Use a fixed base size so
-    -- every quest icon is uniform (scale is the user's questIconScale setting).
-    myPlate.questIcon:SetAtlas(atlas or "questnormal", true)
+    -- Apply atlas texture with UseAtlasSize=FALSE. With true, ClassicAPI's SetAtlas
+    -- forces the atlas's native (large) size and OVERRIDES our SetSize below on this
+    -- client - icons came out huge / inconsistent. With false it only sets the texture
+    -- and our fixed base size (below) controls, so all quest icons are uniform.
+    myPlate.questIcon:SetAtlas(atlas or "questnormal", false)
     local base = 24
     local scale = ns.c_questIconScale * 0.5  -- Match Ascension's internal scaling (* 0.5)
     myPlate.questIcon:SetSize(base * scale, base * scale)
@@ -5300,7 +5299,7 @@ local function UpdateLiteQuestIcon(nameplate, unit)
 
     -- Apply atlas texture. Fixed base size - UseAtlasSize/GetSize is unreliable on
     -- this client and gave inconsistent icon sizes (see UpdateQuestIcon).
-    icon:SetAtlas(atlas or "questnormal", true)
+    icon:SetAtlas(atlas or "questnormal", false)
     local base = 24
     local scale = ns.c_questIconScale * 0.5
     icon:SetSize(base * scale, base * scale)
