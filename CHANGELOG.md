@@ -20,6 +20,10 @@ contributor PR from a tester (JulesPeace).
   `UnitBuff` returns), and the `50725` proc id — so detection works regardless of
   platform and neither one loses Vigilance support.
 
+### Misc
+- Added **`/tp version`** (alias `/tp ver`) to print the installed version in
+  chat on demand.
+
 ## [1.4.5-335] — 2026-06-24
 
 A large stabilization pass focused on private-server (3.3.5a) behavior, the

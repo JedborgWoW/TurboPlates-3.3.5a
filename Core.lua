@@ -1820,6 +1820,12 @@ SlashCmdList["TURBOPLATES"] = function(msg)
         local cmd, args = msg:match("^(%S+)%s*(.*)$")
         cmd = cmd and cmd:lower()
 
+        if cmd == "version" or cmd == "ver" then
+            local version = GetAddOnMetadata(addonName, "Version") or "1.0.0"
+            print("|cff4fa3ffTurboPlates|r v" .. version)
+            return
+        end
+
         if cmd == "stacking" then
             if ns.HandleStackingCommand then
                 ns.HandleStackingCommand(args)
