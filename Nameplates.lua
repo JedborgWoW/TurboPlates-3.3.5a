@@ -723,25 +723,6 @@ function ns.OnPlateBound(blizzFrame, realGUID)
     end
 end
 
--- Symmetric to OnPlateBound: called (from WotlkCompat SetMatch) when a unit is handed
--- to the CORRECT plate, so THIS plate -- a same-named neighbour we'd briefly mis-matched
--- -- is no longer that unit. Clear the visuals it computed for the WRONG unit so they
--- don't bleed: the TurboDebuff icon, and the GUID PIN that feeds the CLEU debuff row
--- (it's pinned to the other mob's GUID; a genuine re-bind re-pins it correctly). Without
--- this the bled icon lingered until its timer expired or you moused over the neighbour.
-function ns.OnPlateUnbound(blizzFrame)
-    if not blizzFrame then return end
-    local mp = blizzFrame.myPlate
-    if not mp then return end
-    if ns.HideTurboDebuff then ns:HideTurboDebuff(mp) end
-    mp.pinnedGUID = nil
-    mp.pinnedName = nil
-    mp.pinnedLevel = nil
-    -- Re-render the regular debuff row now so any bled CLEU entries drop immediately
-    -- (the cleared pin makes MergeTrackedDebuffs fall back to the same-named-safe path).
-    if mp.unit and ns.UpdateAuras then ns:UpdateAuras(mp, mp.unit) end
-end
-
 -- Arena detection for arena-specific features
 local inArena = false
 local IsInInstance = IsInInstance

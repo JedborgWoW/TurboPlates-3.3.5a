@@ -454,22 +454,6 @@ if not HAVE_NATIVE_ENGINE then
         blizzFrame._tpMatchedUnit = unit
         blizzFrame._tpMatchedGUID = unit and _UnitGUID(unit) or nil
         if unit then
-            -- Hand the unit over cleanly. If a DIFFERENT plate was holding this unit
-            -- (a same-named neighbour we briefly mis-matched at full HP), releasing
-            -- blizzFrame above didn't touch it -- it would keep showing this unit's
-            -- TurboDebuff and CLEU debuffs (pinned to the wrong GUID) until the icon's
-            -- timer ran out or you moused over it. Release the previous holder and
-            -- clear its stale, wrong-unit visuals. (A real target SWITCH releases the
-            -- old plate first via PLAYER_TARGET_CHANGED, so prev is nil there and the
-            -- old target legitimately keeps its debuff -- only an uncorrected mis-match
-            -- leaves a live prev here.)
-            local prev = matchUnitToPlate[unit]
-            if prev and prev ~= blizzFrame
-               and (unit == "target" or unit == "focus" or unit == "mouseover") then
-                prev._tpMatchedUnit = nil
-                prev._tpMatchedGUID = nil
-                if ns.OnPlateUnbound then ns.OnPlateUnbound(prev) end
-            end
             matchUnitToPlate[unit] = blizzFrame
             CacheUnitByName(unit)
             -- The plate just gained its real unit. Plates announce on show (before the
