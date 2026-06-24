@@ -3,7 +3,7 @@
 Lightweight nameplate addon for **World of Warcraft 3.3.5a (WotLK, client 30300)**.
 
 This is an **independent backport** of TurboPlates to a stock, unpatched 3.3.5a
-core. The original TurboPlates was written for Ascension's modern nameplate
+core + awesome_wotlk.dll. The original TurboPlates was written for Ascension's modern nameplate
 engine; this fork rebuilds the data layer so it runs on a plain 3.3.5a client.
 See [`BACKPORT_NOTES.md`](BACKPORT_NOTES.md) for the technical details.
 
