@@ -619,15 +619,31 @@ if not HAVE_NATIVE_ENGINE then
         for frame in pairs(managedPlates) do
             RefreshPlateScrape(frame)
             local u = frame._tpMatchedUnit
-            if u and not PlateStillMatchesUnit(frame, u) then
-                local tok = frame._tpToken
-                ReleaseMatch(frame)
-                -- Reset the health bar colour: the plate may have been coloured
-                -- by threat data from the now-gone match (e.g. moused over briefly
-                -- → status=0 → DPS-secure magenta). UpdateColor is not triggered
-                -- automatically on release, so the stale colour would persist
-                -- until the next aura/health/target event hits this plate.
-                if tok and ns.UpdateColor then ns.UpdateColor(tok) end
+            if u then
+                local drop = not PlateStillMatchesUnit(frame, u)
+                -- awesome_wotlk: the plate carries the real mob's "nameplateN" token, so
+                -- verify the binding still points at the SAME mob. PlateStillMatchesUnit
+                -- is name-only and would keep a same-named twin bound to the WRONG unit
+                -- (two identical mobs that briefly share an HP value can bind the wrong
+                -- one in the establish pass) -> a debuff/cast read via UnitAura(matched
+                -- unit) then shows on the wrong plate. Exact GUID mismatch -> release so
+                -- the GUID pass below re-binds the correct plate this same tick.
+                if not drop and HAVE_AWESOME_WOTLK then
+                    local rt = frame._realToken
+                    if rt and _UnitExists(rt) and _UnitGUID(rt) ~= _UnitGUID(u) then
+                        drop = true
+                    end
+                end
+                if drop then
+                    local tok = frame._tpToken
+                    ReleaseMatch(frame)
+                    -- Reset the health bar colour: the plate may have been coloured
+                    -- by threat data from the now-gone match (e.g. moused over briefly
+                    -- → status=0 → DPS-secure magenta). UpdateColor is not triggered
+                    -- automatically on release, so the stale colour would persist
+                    -- until the next aura/health/target event hits this plate.
+                    if tok and ns.UpdateColor then ns.UpdateColor(tok) end
+                end
             end
         end
         -- Correct a premature "target" binding: if the currently bound plate is
@@ -682,6 +698,28 @@ if not HAVE_NATIVE_ENGINE then
             local unit = trackedUnits[i]
             if _UnitExists(unit) and not matchUnitToPlate[unit]
                and not _UnitIsDeadOrGhost(unit) then
+                -- awesome_wotlk: bind by EXACT real-token GUID first. Each plate carries
+                -- the real mob's "nameplateN" token, so this is unambiguous - two
+                -- identical mobs (even sharing an HP value, which the name+HP heuristic
+                -- below would resolve to an arbitrary one and could glow/aura the wrong
+                -- twin) never cross-bind. Falls through to the heuristic when no plate has
+                -- a live token yet (bridge lag) or on stock 3.3.5a (no DLL, no _realToken).
+                local boundByGUID = false
+                if HAVE_AWESOME_WOTLK then
+                    local ug = _UnitGUID(unit)
+                    for c = 1, nCand do
+                        local frame = candFrame[c]
+                        if frame and not frame._tpMatchedUnit then
+                            local rt = frame._realToken
+                            if rt and ug and _UnitExists(rt) and _UnitGUID(rt) == ug then
+                                SetMatch(frame, unit)
+                                boundByGUID = true
+                                break
+                            end
+                        end
+                    end
+                end
+                if not boundByGUID then
                 local uName  = _UnitName(unit)
                 local uLvl   = _UnitLevel(unit)
                 local uHP    = _UnitHealth(unit)
@@ -755,6 +793,7 @@ if not HAVE_NATIVE_ENGINE then
                         SetMatch(alphaFrame, unit)
                     end
                 end
+                end  -- if not boundByGUID (awesome_wotlk exact-GUID bind ran instead)
             end
         end
         -- Release frame references so hidden plates can be GC'd.
