@@ -1167,15 +1167,30 @@ end
 
 -- Count currently-visible enemy plates whose scraped name matches `name`. Gates
 -- the name-only fallback so a single-target debuff is only merged onto an
--- UNIDENTIFIABLE plate when it's the UNIQUE plate of that name.
+-- UNIDENTIFIABLE plate when it's the UNIQUE plate of that name. awesome_wotlk
+-- provides C_NamePlateManager; stock 3.3.5a doesn't, so we count from the
+-- exposed unitToPlate registry instead.
 local function CountPlatesWithName(name)
-    local mgr = C_NamePlateManager
-    if not (mgr and mgr.EnumerateActiveNamePlates) then return 0 end
     local n = 0
-    for blizzFrame in mgr.EnumerateActiveNamePlates() do
-        local mp = blizzFrame.myPlate
-        if mp and not mp.isPlayer and mp.unit and UnitName(mp.unit) == name then
+    -- awesome_wotlk: use the native API if available.
+    local mgr = C_NamePlateManager
+    if mgr and mgr.EnumerateActiveNamePlates then
+        for blizzFrame in mgr.EnumerateActiveNamePlates() do
+            local mp = blizzFrame.myPlate
+            if mp and not mp.isPlayer and mp.unit and UnitName(mp.unit) == name then
+                n = n + 1
+                if n > 1 then return n end  -- early-exit at 2
+            end
+        end
+        return n
+    end
+    -- Stock 3.3.5a: count from the exposed unitToPlate registry (Core.lua).
+    local registry = ns.unitToPlate
+    if not registry then return 0 end
+    for unit, mp in pairs(registry) do
+        if mp and not mp.isPlayer and UnitName(unit) == name then
             n = n + 1
+            if n > 1 then return n end  -- early-exit at 2
         end
     end
     return n
