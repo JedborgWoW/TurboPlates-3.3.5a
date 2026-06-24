@@ -3662,13 +3662,18 @@ local TANK_AURAS = {
     [48263]   = true,  -- WOTLK Death Knight Frost Presence
 }
 
--- Vigilance buff - the persistent 30-min aura applied BY a warrior tank ON a
--- party member; scanned to detect that warrior. Both Ascension (base + 1100000)
--- and stock WOTLK. NOTE: 50720 is the visible aura on the target; 50725 is the
--- taunt-reset proc it triggers and never sits on the target, so we match 50720.
+-- Vigilance buff - applied BY a warrior tank ON a party member; scanned via
+-- UnitBuff to find that warrior. Accept every Vigilance id that can show up
+-- across platforms so detection never silently misses:
+--   1150720 = Ascension Vigilance (base id + 1100000)
+--   50720   = WOTLK Vigilance, the persistent 30-min aura that actually sits on
+--             the target (what UnitBuff returns) and carries the threat transfer
+--   50725   = the no-duration script/proc id Vigilance triggers (taunt reset);
+--             kept as a belt-and-suspenders match in case a client surfaces it
 local VIGILANCE_SPELL_IDS = {
-    [1150720] = true,  -- Ascension Vigilance
-    [50720]   = true,  -- WOTLK Vigilance
+    [1150720] = true,
+    [50720]   = true,
+    [50725]   = true,
 }
 
 -- Vigilance caster cache
