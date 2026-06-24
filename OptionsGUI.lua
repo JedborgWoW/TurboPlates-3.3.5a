@@ -1297,7 +1297,15 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
     arrow:SetRotation(math.rad(180))
     btn.arrow = arrow
 
-    -- Dropdown list container (fixed height with scroll)
+    -- Dropdown list container (fixed height; manual whole-item scrolling).
+    -- This deliberately does NOT use a ScrollFrame. On this 3.3.5a client a
+    -- ScrollFrame's content (its scrollChild's child buttons) does NOT render when
+    -- the list is a floating UIParent popup, regardless of strata (TOOLTIP and HIGH
+    -- both drew an empty black box for Bar Texture + Font). The non-scroll dropdowns
+    -- work because their option buttons are DIRECT children of the list frame, so we
+    -- mirror that exactly: buttons parented straight to `list`, "scrolled" by
+    -- repositioning + show/hide in whole-item steps (no partial overflow => no
+    -- clipping needed, which is the only thing the ScrollFrame was giving us).
     local listName = "TurboPlatesScrollDDList"..scrollDropdownCount
     local list = CreateFrame("Frame", listName, UIParent)
     list:SetFrameStrata("TOOLTIP")
@@ -1322,29 +1330,22 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
     list:Hide()
     btn.list = list
 
-    -- Scroll frame
-    local scrollFrame = CreateFrame("ScrollFrame", nil, list)
-    scrollFrame:SetPoint("TOPLEFT", 3, -3)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -3, 3)
-
-    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetSize(214, totalHeight - 6)
-    scrollFrame:SetScrollChild(scrollChild)
+    -- How many whole items fit the visible window, plus the scroll bounds/state
+    local visibleCount = max(1, floor((listHeight - 6) / itemHeight))
+    local needsScroll = numOpts > visibleCount
+    local maxScroll = max(0, numOpts - visibleCount)
+    local scrollIndex = 0
+    local optButtonWidth = needsScroll and 204 or 214
 
     -- Custom scrollbar (only when needed)
-    local needsScroll = totalHeight > maxHeight
     local scrollBar, scrollThumb
-
     if needsScroll then
-        scrollFrame:SetPoint("BOTTOMRIGHT", -12, 3)
-        scrollChild:SetWidth(202)
-
         scrollBar = CreateFrame("Frame", nil, list)
         scrollBar:SetSize(8, listHeight - 8)
         scrollBar:SetPoint("TOPRIGHT", -2, -4)
 
         scrollThumb = CreateFrame("Button", nil, scrollBar)
-        local thumbHeight = max(20, (maxHeight / totalHeight) * (listHeight - 8))
+        local thumbHeight = max(20, (visibleCount / numOpts) * (listHeight - 8))
         scrollThumb:SetSize(8, thumbHeight)
         scrollThumb:SetPoint("TOP", 0, 0)
         local thumbTex = scrollThumb:CreateTexture(nil, "OVERLAY")
@@ -1352,11 +1353,39 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
         thumbTex:SetTexture(bdTex)
         thumbTex:SetVertexColor(cr, cg, cb, 0.6)
         scrollThumb.tex = thumbTex
-
         scrollThumb:SetScript("OnEnter", function(self) self.tex:SetVertexColor(cr, cg, cb, 0.9) end)
         scrollThumb:SetScript("OnLeave", function(self) self.tex:SetVertexColor(cr, cg, cb, 0.6) end)
+    end
 
-        -- Drag scrollbar
+    local optButtons = {}
+
+    -- Reposition/show the buttons for the current scrollIndex and sync the thumb
+    local function Layout()
+        for i = 1, numOpts do
+            local b = optButtons[i]
+            local pos = (i - 1) - scrollIndex
+            if pos >= 0 and pos < visibleCount then
+                b:ClearAllPoints()
+                b:SetPoint("TOPLEFT", 3, -3 - pos * itemHeight)
+                b:Show()
+            else
+                b:Hide()
+            end
+        end
+        if scrollThumb and maxScroll > 0 then
+            local barHeight = scrollBar:GetHeight() - scrollThumb:GetHeight()
+            scrollThumb:ClearAllPoints()
+            scrollThumb:SetPoint("TOP", 0, -(scrollIndex / maxScroll) * barHeight)
+        end
+    end
+
+    local function SetScroll(idx)
+        scrollIndex = max(0, min(maxScroll, idx))
+        Layout()
+    end
+
+    if needsScroll then
+        -- Drag scrollbar (maps cursor Y within the bar to a whole-item index)
         local function ScrollThumbOnUpdate(self)
             local _, cursorY = GetCursorPosition()
             local scale = scrollBar:GetEffectiveScale()
@@ -1365,45 +1394,25 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
             local barHeight = scrollBar:GetHeight() - self:GetHeight()
             local offset = barTop - cursorY - self:GetHeight() / 2
             offset = max(0, min(barHeight, offset))
-            local scrollMax = scrollFrame:GetVerticalScrollRange()
-            scrollFrame:SetVerticalScroll(scrollMax * (offset / barHeight))
+            SetScroll(floor((offset / barHeight) * maxScroll + 0.5))
         end
         scrollThumb:SetScript("OnMouseDown", function(self) self:SetScript("OnUpdate", ScrollThumbOnUpdate) end)
         scrollThumb:SetScript("OnMouseUp", function(self) self:SetScript("OnUpdate", nil) end)
-
-        -- Update thumb position on scroll
-        local function UpdateScrollBar()
-            local scrollMax = scrollFrame:GetVerticalScrollRange()
-            if scrollMax > 0 then
-                local scrollCurrent = scrollFrame:GetVerticalScroll()
-                local barHeight = scrollBar:GetHeight() - scrollThumb:GetHeight()
-                local thumbOffset = (scrollCurrent / scrollMax) * barHeight
-                scrollThumb:SetPoint("TOP", 0, -thumbOffset)
-            end
-        end
-        scrollFrame:SetScript("OnVerticalScroll", UpdateScrollBar)
     end
 
     -- Mouse wheel
     list:EnableMouseWheel(true)
     list:SetScript("OnMouseWheel", function(self, delta)
-        local current = scrollFrame:GetVerticalScroll()
-        local maxScroll = scrollFrame:GetVerticalScrollRange()
-        local newScroll = current - (delta * 40)
-        newScroll = max(0, min(maxScroll, newScroll))
-        scrollFrame:SetVerticalScroll(newScroll)
+        SetScroll(scrollIndex - delta)
     end)
 
-    -- Create option buttons
+    -- Create option buttons as DIRECT children of `list` (like the non-scroll
+    -- dropdown). Positions are assigned by Layout().
     for i, opt in ipairs(options) do
-        local optBtn = CreateFrame("Button", nil, scrollChild)
-        -- Raise above the list's opaque background: on this 3.3.5a client a child
-        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
-        -- option labels were invisible (but still clickable). Frame level is the
-        -- authoritative draw order, so +1 over the list puts the text on top.
+        local optBtn = CreateFrame("Button", nil, list)
+        -- +1 over the list so the label/text draws above the list's BACKGROUND.
         optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
-        optBtn:SetSize(scrollChild:GetWidth() - 2, 18)
-        optBtn:SetPoint("TOPLEFT", 1, -(i - 1) * itemHeight)
+        optBtn:SetSize(optButtonWidth, 18)
 
         local optText = optBtn:CreateFontString(nil, "OVERLAY")
         SetGUIFont(optText, 12, "")
@@ -1431,7 +1440,11 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
             UpdateAll()
             if callback then callback(self.value) end
         end)
+
+        optButtons[i] = optBtn
     end
+
+    Layout()
 
     -- Toggle list
     btn:SetScript("OnClick", function(self)
@@ -1443,8 +1456,7 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
             list:SetPoint("TOP", self, "BOTTOM", 0, -2)
             list:Show()
             arrow:SetRotation(math.rad(0))
-            scrollFrame:SetVerticalScroll(0)
-            if scrollThumb then scrollThumb:SetPoint("TOP", 0, 0) end
+            SetScroll(0)
         end
     end)
 
