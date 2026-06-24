@@ -49,6 +49,7 @@ local ipairs = ipairs
 local wipe = wipe
 local math_max = math.max
 local floor = math.floor
+local ceil = math.ceil
 local format = string.format
 local strsub = string.sub
 local strmatch = string.match
@@ -1110,10 +1111,12 @@ local function FormatHealthValue(current, max, healthFmt)
         return ""
     end
 
-    -- FLOOR (truncate), matching WoW's standard health-% convention: a unit reads "10%"
-    -- until it actually crosses to 11%. The old round-to-nearest (+0.5) showed 11% for
-    -- a mob at 10.5-10.9%, ~1% higher than every other health display.
-    local percentInt = floor((current / max) * 100)
+    -- CEIL (round any fraction up) to match the unit-frame addons the user compares
+    -- against, which show 75% for a mob at 74.x% (and 66% for 65.x%). floor() read 1%
+    -- LOW vs those frames; round-to-nearest read 1% HIGH near .5. ceil makes the
+    -- nameplate agree with the unit frame. Full health is handled by the atFullHealth
+    -- branch, and percentCache[100] clamps, so 100% never overflows to 101.
+    local percentInt = ceil((current / max) * 100)
     local deficit = max - current
     local atFullHealth = (current == max)
     local hideWhenFull = ns.c_hidePercentWhenFull  -- User setting (default false = show 100%)
@@ -1775,7 +1778,7 @@ local function UpdateSingleHeroPowerBar(bar)
         local powerFmt = ns.c_personalPowerFormat
         if powerFmt and powerFmt ~= "none" then
             local text = ""
-            local percentInt = floor((power / maxPower) * 100)
+            local percentInt = ceil((power / maxPower) * 100)
             local percentStr = percentCache[percentInt] or percentCache[100]
             local deficit = maxPower - power
             local atFullPower = (power == maxPower)
@@ -1959,7 +1962,7 @@ local function UpdatePowerBar(myPlate, unit)
     local powerFmt = ns.c_personalPowerFormat
     if powerFmt and powerFmt ~= "none" then
         local text = ""
-        local percentInt = floor((power / maxPower) * 100)
+        local percentInt = ceil((power / maxPower) * 100)
         local percentStr = percentCache[percentInt] or percentCache[100]
         local deficit = maxPower - power
         local atFullPower = (power == maxPower)
