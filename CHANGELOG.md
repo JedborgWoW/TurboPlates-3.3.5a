@@ -20,6 +20,16 @@ contributor PR from a tester (JulesPeace).
   `UnitBuff` returns), and the `50725` proc id — so detection works regardless of
   platform and neither one loses Vigilance support.
 
+### Castbars
+- **Fixed false cast bars on stock 3.3.5a** (no awesome_wotlk) where a mob
+  appeared to be casting when it wasn't. An off-screen mob casting in combat-log
+  range had its cast shown on a visible same-named mob that wasn't casting,
+  because stock has no way to tie an untargeted cast to a specific plate by name.
+  Untargeted casts on stock now show **only on a plate you've targeted or
+  moused-over** (resolved exactly by GUID), so they can't bleed onto the wrong
+  mob. **awesome_wotlk is unchanged** — it still shows untargeted casts on every
+  plate, resolved exactly via the real `nameplateN` token.
+
 ### Misc
 - Added **`/tp version`** (alias `/tp ver`) to print the installed version in
   chat on demand.

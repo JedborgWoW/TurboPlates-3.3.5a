@@ -1466,36 +1466,21 @@ if not HAVE_NATIVE_ENGINE then
     -- path) ever showed. SPELL_CAST_START fires for EVERY caster in range with no
     -- unitID, and GetSpellInfo gives the icon AND the base cast time - enough to
     -- render a self-animating bar with no unit and no Blizzard bar. Cached by GUID
-    -- (pinned-plate path) and by name (unique-plate fallback), mirroring the debuff
-    -- cache. entry = { name, icon, start, duration, srcName, guid }
-    local castInfoByName = {}  -- [caster name] = entry  (last caster of that name)
+    -- ONLY: a cast is rendered on a plate solely when that plate is bound to the
+    -- caster's GUID -- pinned (stock) or a real nameplateN token (awesome_wotlk).
+    -- The former by-name index was removed: it bled an off-screen same-named
+    -- caster's cast onto a visible non-caster (see ProcessPlateCasts stock branch).
+    -- entry = { name, icon, start, duration, guid }
     local castByGUID = {}      -- [caster GUID] = entry
     local lastCastSweep = 0    -- throttle for the stale-entry sweep below
     local CAST_GRACE = 0.5     -- keep the bar this long past the estimated cast time
                                -- (haste makes the real cast shorter; the end event
                                -- normally clears it first) before treating a missed
                                -- end event as stale.
-    -- Fully remove a cast entry from both indices (entries are shared between them).
+    -- Fully remove a cast entry from the GUID index.
     local function ClearCastEntry(entry)
         if not entry then return end
         if entry.guid and castByGUID[entry.guid] == entry then castByGUID[entry.guid] = nil end
-        if entry.srcName and castInfoByName[entry.srcName] == entry then
-            castInfoByName[entry.srcName] = nil
-        end
-    end
-    -- Count currently-visible managed plates whose scraped name == `name`. Gates the
-    -- stock (no-DLL) name fallback so an untargeted cast is shown by name ONLY when
-    -- it's the unique plate of that name - otherwise the bar would bleed onto every
-    -- same-named twin (no plate->GUID on stock to tell them apart). Early-exits at 2.
-    local function CountVisiblePlatesByName(name)
-        local n = 0
-        for f in pairs(managedPlates) do
-            if f._tpAnnounced and f:IsShown() and PlateName(f) == name then
-                n = n + 1
-                if n > 1 then return n end
-            end
-        end
-        return n
     end
     local function ScanWorldFrame()
         wipe(visible)
@@ -1570,35 +1555,32 @@ if not HAVE_NATIVE_ENGINE then
                 local pname = PlateName(frame)
                 -- awesome_wotlk: this plate carries a real FrostAtom "nameplateN" token
                 -- that resolves to the EXACT mob it shows, so match the cast by that
-                -- mob's real GUID ALONE - never the name-union below. This is what stops
-                -- a cast bleeding onto same-named neighbours the name index can't tell
-                -- apart (one Murkgill Oracle casting Lightning Bolt, three standing by;
-                -- two Sifreldar Storm Maidens, one casting): the DLL token disambiguates
-                -- twins exactly. nil castByGUID[rg] => this mob isn't casting => no bar.
+                -- mob's real GUID. This is what lets awesome_wotlk show untargeted casts
+                -- on ANY plate without bleeding onto same-named neighbours (one Murkgill
+                -- Oracle casting Lightning Bolt, three standing by; two Sifreldar Storm
+                -- Maidens, one casting): the DLL token disambiguates twins exactly.
+                -- nil castByGUID[rg] => this mob isn't casting => no bar.
                 local rt = frame._realToken
                 if rt and _UnitExists(rt) then
                     local rg = _UnitGUID(rt)
                     info = rg and castByGUID[rg] or nil
                 else
                     -- Stock 3.3.5a (no DLL): there is NO plate->GUID for an unbound mob,
-                    -- so we can't tell same-named twins apart by token. Resolve the caster
-                    -- WITHOUT bleeding the bar onto innocent neighbours, most-reliable
-                    -- first (same precision-over-warning rule the debuffs use):
-                    --   1. pinned GUID - the caster was target/focus/moused-over at least
-                    --      once, so its plate carries the real GUID. Exact, even when two
-                    --      same-named mobs cast different spells.
-                    --   2. unique name - it's the ONLY visible plate of that name, so
-                    --      there is no twin the bar could bleed onto.
-                    -- 2+ same-named and none pinned: show NOTHING. The stock client gives
-                    -- no way to know which is casting, and a bar on every twin (the old
-                    -- behaviour, the reported bug) is worse than none. Targeting/mousing
-                    -- over the real caster once pins it and resolves this exactly.
+                    -- so the ONLY reliable way to know THIS plate is the caster is its
+                    -- PINNED GUID (set when you targeted/focused/moused-over it at least
+                    -- once). The former name fallback (show on the unique VISIBLE plate of
+                    -- the caster's name) was fundamentally ambiguous and bled a bar onto
+                    -- innocent mobs: an OFF-SCREEN same-named caster (in combat-log range
+                    -- but with no nameplate) cast Frostbolt, and the bar rendered on a
+                    -- visible same-named mob that wasn't casting ("mobs look like they're
+                    -- casting when they aren't"). Nothing on the stock client can tell the
+                    -- two apart, so we show NOTHING unless the plate is pinned; mousing
+                    -- over the real caster once pins it and shows the cast exactly.
+                    -- (awesome_wotlk resolves this exactly via the real nameplateN GUID in
+                    -- the branch above and is unaffected by this.)
                     local pg = mp and mp.pinnedGUID
                     if pg and castByGUID[pg] and mp.pinnedName == pname then
                         info = castByGUID[pg]
-                    elseif pname and castInfoByName[pname]
-                           and CountVisiblePlatesByName(pname) <= 1 then
-                        info = castInfoByName[pname]
                     end
                 end
                 -- Past the estimated cast time with no end event: treat as stale and
@@ -1770,9 +1752,8 @@ if not HAVE_NATIVE_ENGINE then
             if dur then
                 local now = GetTime()
                 local entry = { name = giName or spellName, icon = giIcon,
-                                start = now, duration = dur, srcName = srcName, guid = srcGUID }
+                                start = now, duration = dur, guid = srcGUID }
                 castByGUID[srcGUID] = entry
-                castInfoByName[srcName] = entry
             end
         elseif subevent == "SPELL_CAST_SUCCESS" or subevent == "SPELL_CAST_FAILED"
                or subevent == "SPELL_INTERRUPT" then
