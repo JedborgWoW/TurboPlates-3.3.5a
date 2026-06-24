@@ -30,6 +30,19 @@ contributor PR from a tester (JulesPeace).
   mob. **awesome_wotlk is unchanged** — it still shows untargeted casts on every
   plate, resolved exactly via the real `nameplateN` token.
 
+### Same-named mobs (debuff icons no longer bleed)
+- **Fixed a debuff icon (e.g. Polymorph, Sap) bleeding onto same-named mobs.**
+  When several identical mobs stood together, a debuff on one could appear on the
+  others. Two separate causes were fixed:
+  - **awesome_wotlk:** the plate matcher could bind the wrong same-named mob when
+    two shared a health value. It now binds **exactly by the real `nameplateN`
+    token**, so two identical mobs (even at equal health) never cross-bind.
+  - **stock 3.3.5a:** a plate could keep a stale internal link to a mob it no
+    longer represented (after the game briefly bound the wrong twin to your
+    target), making your target's debuff show on it. The link is now **validated
+    against the live binding** before use, so a debuff only shows on the mob it
+    actually belongs to.
+
 ### Misc
 - Added **`/tp version`** (alias `/tp ver`) to print the installed version in
   chat on demand.
