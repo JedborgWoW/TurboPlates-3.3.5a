@@ -3,6 +3,24 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
+## [1.4.6-335] — 2026-06-24
+
+Fixes auto/smart **tank mode** detection on stock 3.3.5a (WOTLK), based on a
+contributor PR from a tester (JulesPeace).
+
+### Tank role auto-detection
+- **Tank auras now recognised on stock WOTLK, not just Ascension.** The
+  manual-group fallback that detects a tank by buff previously only knew the
+  Ascension (Level 60 custom) spell IDs. Added the stock-WOTLK IDs alongside
+  them: Druid Dire Bear Form (`9634`), Paladin Righteous Fury (`25780`) and
+  Death Knight Frost Presence (`48263`).
+- **Fixed warrior-tank detection via Vigilance on WOTLK.** Vigilance is now
+  matched by the correct buff `50720` — the persistent 30-min aura that sits on
+  the party member — instead of `50725`, which is only the taunt-reset proc that
+  Vigilance triggers and never appears on the target. Both the Ascension
+  (`1150720`) and stock-WOTLK (`50720`) IDs are accepted, so neither platform
+  loses Vigilance detection.
+
 ## [1.4.5-335] — 2026-06-24
 
 A large stabilization pass focused on private-server (3.3.5a) behavior, the

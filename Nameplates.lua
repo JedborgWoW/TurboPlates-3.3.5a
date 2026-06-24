@@ -3651,16 +3651,25 @@ local group = {
     playerIsTank = false,
 }
 
--- Tank aura spell IDs for Ascension (Level 60 custom)
--- Used when LFG roles aren't available (manual groups)
+-- Tank aura spell IDs (manual-group fallback when LFG roles aren't available).
+-- Both Ascension (Level 60 custom, base WOTLK id + 1100000) and stock WOTLK.
 local TANK_AURAS = {
-    [1182001] = true,  -- Shaman tank buff
-    [1109634] = true,  -- Druid Bear Form
-    [1125780] = true,  -- Paladin Righteous Fury
+    [1182001] = true,  -- Ascension Shaman tank buff (no stock-WOTLK equivalent)
+    [1109634] = true,  -- Ascension Druid Dire Bear Form
+    [1125780] = true,  -- Ascension Paladin Righteous Fury
+    [9634]    = true,  -- WOTLK Druid Dire Bear Form
+    [25780]   = true,  -- WOTLK Paladin Righteous Fury
+    [48263]   = true,  -- WOTLK Death Knight Frost Presence
 }
 
--- Vigilance spell ID - cast BY warrior tank ON party member
-local VIGILANCE_SPELL_ID = 1150720
+-- Vigilance buff - the persistent 30-min aura applied BY a warrior tank ON a
+-- party member; scanned to detect that warrior. Both Ascension (base + 1100000)
+-- and stock WOTLK. NOTE: 50720 is the visible aura on the target; 50725 is the
+-- taunt-reset proc it triggers and never sits on the target, so we match 50720.
+local VIGILANCE_SPELL_IDS = {
+    [1150720] = true,  -- Ascension Vigilance
+    [50720]   = true,  -- WOTLK Vigilance
+}
 
 -- Vigilance caster cache
 local cachedVigilanceCaster = nil
@@ -3699,7 +3708,7 @@ local function FindVigilanceCaster(forceRescan)
         for i = 1, 40 do
             local _, _, _, _, _, _, _, caster, _, _, spellId = UnitBuff(unit, i)
             if not spellId then return nil end
-            if spellId == VIGILANCE_SPELL_ID and caster then
+            if VIGILANCE_SPELL_IDS[spellId] and caster then
                 return UnitName(caster)
             end
         end
@@ -3792,7 +3801,7 @@ local function UpdatePlayerTankStatus()
         return
     end
 
-    -- Priority 3: Check tank auras (Shaman/Druid/Paladin)
+    -- Priority 3: Check tank auras (Shaman/Druid/Paladin/Death Knight)
     if HasTankAura("player") then
         group.playerIsTank = true
         return
