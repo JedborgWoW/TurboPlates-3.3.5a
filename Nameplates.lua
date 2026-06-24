@@ -4339,6 +4339,17 @@ UpdateColor = function(unit)
 
     -- From here, status is 0, 1, 2, or 3 - unit is on the threat table
 
+    -- Threat colouring only means something when another unit can compete for
+    -- aggro - a group/raid or your own pet. Solo with no pet you ALWAYS hold
+    -- aggro, yet stock 3.3.5a forces full aggro from the combat log for unbound
+    -- plates (ThreatAggro.lua), so every mob that hit you turned threat/tank
+    -- colour. Paint the plain hostile colour instead - matching the threat TEXT
+    -- (hidden solo) and awesome_wotlk. Grouped / pet players still get coloured.
+    if not (group.inGroup or UnitExists("pet")) then
+        myPlate.hp:SetStatusBarColor(ns.c_hpColor_r, ns.c_hpColor_g, ns.c_hpColor_b)
+        return
+    end
+
     -- Determine if tank mode is active
     local tankModeActive = false
     local tankModeValue = ns.c_tankMode

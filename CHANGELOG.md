@@ -26,6 +26,13 @@ contributor PR from a tester (JulesPeace).
   and since the stock threat fallback treats "a mob is hitting you" as full
   aggro, every incoming attack painted the tank "secure aggro" colour. The check
   now requires the WARRIOR class.
+- **Fixed threat/tank colour appearing when solo on stock 3.3.5a.** A mob
+  attacking you while solo turned the health bar a threat colour (magenta tank
+  "secure aggro", or the DPS aggro colour), because the stock combat-log fallback
+  forces full aggro for unbound plates even when there's no one to compete for
+  threat. Threat colouring now only applies in a group/raid or when you have a
+  pet — matching the threat *text* (already hidden solo) and awesome_wotlk. Solo
+  with no pet, hostile mobs use the normal hostile colour again.
 
 ### Castbars
 - **Fixed false cast bars on stock 3.3.5a** (no awesome_wotlk) where a mob
