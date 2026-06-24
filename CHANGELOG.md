@@ -25,7 +25,8 @@ quest icons, and the options UI.
 
 ### Same-named mobs (no more "bleed" between identical plates)
 - **Fixed debuffs and health-bar colour bleeding onto a same-named neighbour.**
-  Debuffs from the combat log are now pinned to a specific plate by GUID.
+  Debuffs from the combat log are now pinned to a specific plate by GUID — and
+  resolved to the exact mob via the real `nameplateN` token on awesome_wotlk.
 - **Fixed aggro/threat colour bleeding onto same-named plates** via the
   name-fallback path.
 - **Fixed Sap (and other CLEU debuffs) not showing / flickering** on a
@@ -44,8 +45,14 @@ quest icons, and the options UI.
 ### Castbars
 - **Untargeted casts now show on nameplates again.** On stock 3.3.5a the engine
   doesn't drive the Blizzard cast bar, so casts are now mirrored from the combat
-  log — including the **spell name and icon** — and shown on every relevant
-  plate instead of only the current target.
+  log — including the **spell name and icon** — instead of only showing on the
+  current target.
+- **Fixed the cast bar bleeding onto same-named neighbours.** When several
+  identical mobs stood together, one casting showed the bar on all of them. The
+  cast is now resolved to the **exact** caster: on **awesome_wotlk** via the real
+  `nameplateN` token, and on **stock** by the pinned plate or, failing that, only
+  when it's the unique visible plate of that name (otherwise nothing, rather than
+  a wrong bar on every twin — target/mouseover the caster once to pin it).
 
 ### Quest icons
 - Quest mobs are now learned from the tooltip (including item-drop quests) on
