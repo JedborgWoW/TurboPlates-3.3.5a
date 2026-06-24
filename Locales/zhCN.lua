@@ -308,6 +308,7 @@ L.TargetPvPColors = "目标/PvP颜色："
 L.Font = "字体"
 L.FontSize = "姓名版名称字号"
 L.NameTextYOffset = "名称垂直偏移"
+L.PlateYOffset = "姓名板垂直偏移"
 L.FontOutline = "字体描边"
 L.NameDisplayFormat = "名称显示格式"
 

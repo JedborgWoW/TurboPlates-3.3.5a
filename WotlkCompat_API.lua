@@ -273,16 +273,22 @@ do
         ["islands-azeriteboss"]   = SKULL,
     }
     function texMeta:SetAtlas(atlas, ...)
+        -- Prefer OUR verified 3.3.5a texture when we have one mapped. ClassicAPI's
+        -- SetAtlas can "succeed" (pcall ok) yet render BLANK for some retail atlases --
+        -- the yellow checkmark did exactly this, so every /tp checkbox showed no tick
+        -- even when ticked (the setting still applied). The old order trusted that ok
+        -- result and never reached the fallback. Our mapping is authoritative; only
+        -- defer to ClassicAPI for atlases we don't have a real texture for.
+        local fb = atlas and ATLAS_FALLBACK[atlas]
+        if fb then
+            self:SetTexture(fb)
+            return
+        end
         if rawSetAtlas then
             local ok = pcall(rawSetAtlas, self, atlas, ...)
             if ok then return end
         end
-        local fb = atlas and ATLAS_FALLBACK[atlas]
-        if fb then
-            self:SetTexture(fb)
-        else
-            self:SetTexture(nil)
-        end
+        self:SetTexture(nil)
     end
 end
 

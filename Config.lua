@@ -332,6 +332,7 @@ ns.L = {
     Font = "Font",
     FontSize = "Nameplate Name Size",
     NameTextYOffset = "Nameplate Name Y Offset",
+    PlateYOffset = "Nameplate Vertical Offset",
     FontOutline = "Font Outline",
     NameDisplayFormat = "Name Display Format",
 
@@ -755,6 +756,7 @@ ns.defaults = {
     healthValueFormat = "percent",  -- Health value display format
     healthValueFontSize = 8,     -- Health value font size
     nameTextYOffset = 0,         -- User-adjustable name text vertical offset
+    plateYOffset = 0,            -- User-adjustable whole-plate (healthbar) vertical offset
     nameInHealthbar = false,     -- Show name inside healthbar (left) with health value (right)
     hidePercentWhenFull = false,  -- Hide percent display when at full health (disabled by default)
     totemDisplay = "icon_name",   -- Totem display mode: disabled, hp_name, icon_only, icon_name, icon_hp, icon_name_hp

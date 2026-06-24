@@ -303,6 +303,7 @@ L.TargetPvPColors = "Target/PvP Colors:"
 L.Font = "Font"
 L.FontSize = "Nameplate Name Size"
 L.NameTextYOffset = "Nameplate Name Y Offset"
+L.PlateYOffset = "Nameplate Vertical Offset"
 L.FontOutline = "Font Outline"
 L.NameDisplayFormat = "Name Display Format"
 

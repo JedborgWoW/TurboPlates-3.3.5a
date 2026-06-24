@@ -287,6 +287,7 @@ local T = {
     Font = "Police",
     FontSize = "Taille du nom",
     NameTextYOffset = "Décalage Y du nom",
+    PlateYOffset = "Décalage vertical",
     FontOutline = "Contour de police",
     NameDisplayFormat = "Format d'affichage du nom",
     HealthValueFormat = "Format de la santé",

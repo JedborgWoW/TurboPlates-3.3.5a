@@ -1804,6 +1804,11 @@ EventRegistry:RegisterCallback("NamePlateManager.UnitRemoved", OnNamePlateRemove
 local nameplateEventFallback = CreateFrame("Frame")
 nameplateEventFallback:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 nameplateEventFallback:SetScript("OnEvent", function(_, _, unit)
+    -- Compat mode removes plates via the WotlkCompat synthetic-token driver. The real
+    -- NAME_PLATE_UNIT_REMOVED here carries a "nameplateN" token that isn't part of our
+    -- tracking, so processing it desyncs state; only the native (Ascension) engine needs
+    -- this fallback.
+    if ns.IS_WOTLK_COMPAT then return end
     local nameplate = ns.unitToNameplate[unit]
     OnNamePlateRemoved(nil, unit, nameplate)
 end)

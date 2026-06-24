@@ -1617,6 +1617,11 @@ local pendingPlayerAura = false  -- Flag for player aura update (personal bar)
 
 -- Fast nameplate check (uses cached strsub)
 local function IsNameplateUnit(unit)
+    -- See Nameplates.lua IsNameplateUnit: in compat mode ignore awesome_wotlk's real
+    -- "nameplateN" tokens (synthetic "TurboPlateN" is authoritative; real-token events
+    -- desync Core's plate tracking and froze the health bar). Auras come from the CLEU
+    -- mirror in compat mode, not real UNIT_AURA.
+    if ns.IS_WOTLK_COMPAT then return false end
     return unit and strsub(unit, 1, 9) == "nameplate"
 end
 

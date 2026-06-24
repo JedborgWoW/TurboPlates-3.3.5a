@@ -374,6 +374,7 @@ function ns:UpdateDBCache()
     ns.c_healthValueFormat = db.healthValueFormat or "none"
     ns.c_healthValueFontSize = db.healthValueFontSize or 10
     ns.c_nameTextYOffset = db.nameTextYOffset or 0
+    ns.c_plateYOffset = db.plateYOffset or 0
     ns.c_nameInHealthbar = db.nameInHealthbar == true  -- Default to false
     ns.c_hidePercentWhenFull = db.hidePercentWhenFull == true  -- Default to false (show 100%)
 
@@ -551,6 +552,7 @@ function ns:UpdateDBCache()
             -- Dimension caches
             myPlate._lastWidth = nil
             myPlate._lastHpHeight = nil
+            myPlate._lastPlateY = nil
             myPlate._lastBgAlpha = nil
             myPlate._lastBorderShown = nil
             -- Execute indicator
@@ -1108,7 +1110,10 @@ local function FormatHealthValue(current, max, healthFmt)
         return ""
     end
 
-    local percentInt = floor((current / max) * 100 + 0.5)  -- Round to integer for cache lookup
+    -- FLOOR (truncate), matching WoW's standard health-% convention: a unit reads "10%"
+    -- until it actually crosses to 11%. The old round-to-nearest (+0.5) showed 11% for
+    -- a mob at 10.5-10.9%, ~1% higher than every other health display.
+    local percentInt = floor((current / max) * 100)
     local deficit = max - current
     local atFullHealth = (current == max)
     local hideWhenFull = ns.c_hidePercentWhenFull  -- User setting (default false = show 100%)
@@ -1282,7 +1287,7 @@ local function EnsureFullPlate(myPlate)
     if myPlate.hp then return end  -- Already has health bar
 
     local hp = CreateFrame("StatusBar", nil, myPlate)
-    PixelUtil.SetPoint(hp, "CENTER", myPlate, "CENTER", 0, -3, 1, 1)
+    PixelUtil.SetPoint(hp, "CENTER", myPlate, "CENTER", 0, -3 + (ns.c_plateYOffset or 0), 1, 1)
     hp:EnableMouse(false)  -- Pass through clicks
     hp:Hide()  -- Start hidden
 
@@ -1770,7 +1775,7 @@ local function UpdateSingleHeroPowerBar(bar)
         local powerFmt = ns.c_personalPowerFormat
         if powerFmt and powerFmt ~= "none" then
             local text = ""
-            local percentInt = floor((power / maxPower) * 100 + 0.5)
+            local percentInt = floor((power / maxPower) * 100)
             local percentStr = percentCache[percentInt] or percentCache[100]
             local deficit = maxPower - power
             local atFullPower = (power == maxPower)
@@ -1954,7 +1959,7 @@ local function UpdatePowerBar(myPlate, unit)
     local powerFmt = ns.c_personalPowerFormat
     if powerFmt and powerFmt ~= "none" then
         local text = ""
-        local percentInt = floor((power / maxPower) * 100 + 0.5)
+        local percentInt = floor((power / maxPower) * 100)
         local percentStr = percentCache[percentInt] or percentCache[100]
         local deficit = maxPower - power
         local atFullPower = (power == maxPower)
@@ -2813,6 +2818,14 @@ function ns:UpdatePlateStyle(myPlate)
                 PixelUtil.SetHeight(myPlate.hp, ns.c_hpHeight, 1)
                 myPlate._lastWidth = ns.c_width
                 myPlate._lastHpHeight = ns.c_hpHeight
+            end
+
+            -- Whole-plate vertical offset: re-anchor the health bar within myPlate.
+            -- Every other element (name, castbar, power, combo points, debuffs) anchors
+            -- to hp, so shifting hp lifts the entire plate off the mob together.
+            if myPlate._lastPlateY ~= ns.c_plateYOffset then
+                PixelUtil.SetPoint(myPlate.hp, "CENTER", myPlate, "CENTER", 0, -3 + (ns.c_plateYOffset or 0), 1, 1)
+                myPlate._lastPlateY = ns.c_plateYOffset
             end
         end
 
@@ -6138,6 +6151,15 @@ ns.UpdatePersonalPowerEvents = UpdatePersonalPowerEvents
 
 -- Fast nameplate check (uses cached strsub)
 local function IsNameplateUnit(unit)
+    -- In compat mode the authoritative tokens are our synthetic "TurboPlateN" (which
+    -- never match the "nameplate" prefix), and awesome_wotlk's REAL "nameplateN" tokens
+    -- must be IGNORED here. Letting a real-token UNIT_FACTION through made
+    -- RefreshPlateForUnit -> OnNamePlateAdded("nameplateN") re-track the frame and CLEAR
+    -- the synthetic ns.unitToPlate["TurboPlateN"] entry (Core TrackNameplate old-unit
+    -- path), after which UpdateHealth returns early and the health bar FROZE. Real
+    -- UNIT_HEALTH is harvested by the WotlkCompat FrostAtom bridge and routed through the
+    -- synthetic token instead, so nothing is lost by ignoring real tokens here.
+    if ns.IS_WOTLK_COMPAT then return false end
     return unit and strsub(unit, 1, 9) == "nameplate"
 end
 

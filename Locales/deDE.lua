@@ -287,6 +287,7 @@ local T = {
     Font = "Schriftart",
     FontSize = "Namensgröße",
     NameTextYOffset = "Name Y",
+    PlateYOffset = "Vertikaler Versatz",
     FontOutline = "Kontur",
     NameDisplayFormat = "Namensformat",
     HealthValueFormat = "HP-Format",

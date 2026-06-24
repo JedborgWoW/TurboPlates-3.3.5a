@@ -35,11 +35,15 @@ local HAVE_NATIVE_ENGINE = (type(C_NamePlate) == "table"
     and type(C_NamePlate.GetNamePlateForUnit) == "function"
     and type(C_NamePlateManager) == "table")
 
--- awesome_wotlk DLL adds C_NamePlate.GetNamePlateForUnit + native events but
--- NOT C_NamePlateManager, so HAVE_NATIVE_ENGINE stays false and our compat
--- layer runs normally. We detect it here (before we overwrite C_NamePlate)
--- to expose it in diagnostics and to fall back to the native resolver inside
--- our GetNamePlateForUnit polyfill.
+-- awesome_wotlk DLL adds C_NamePlate.GetNamePlateForUnit + native events but NOT
+-- C_NamePlateManager, so HAVE_NATIVE_ENGINE stays false and our compat layer runs
+-- normally. We detect it here (before we overwrite C_NamePlate) to expose it in
+-- diagnostics, fall back to the native resolver inside our GetNamePlateForUnit
+-- polyfill, and -- via the token bridge below -- tag each managed frame with its
+-- real "nameplateN" token so health reads live UnitHealth instead of the freezable
+-- bar scrape (the scrape can stall once the textureless bar stops firing
+-- OnValueChanged). PURE FALLBACK: a frame that never receives a real token stays on
+-- the scrape path exactly as on a stock (no-awesome_wotlk) server.
 local HAVE_AWESOME_WOTLK = (not HAVE_NATIVE_ENGINE
     and type(C_NamePlate) == "table"
     and type(C_NamePlate.GetNamePlateForUnit) == "function")
@@ -361,6 +365,14 @@ if not HAVE_NATIVE_ENGINE then
         return s and tonumber(s) or nil
     end
     local function PlateHealth(blizzFrame)
+        -- FrostAtom real "nameplateN" token: read live UnitHealth straight from the
+        -- engine. Immune to the textureless-bar OnValueChanged freeze that stalls the
+        -- scrape. _UnitExists guards a token left stale by a recycled plate -> falls
+        -- through to the scrape below (so stock servers are unaffected).
+        local rt = blizzFrame._realToken
+        if rt and _UnitExists(rt) then
+            return _UnitHealth(rt), _UnitHealthMax(rt)
+        end
         if blizzFrame._tpHP ~= nil then
             return blizzFrame._tpHP, blizzFrame._tpHPMax
         end
@@ -503,6 +515,27 @@ if not HAVE_NATIVE_ENGINE then
                         ns.UpdateNameplateHealth(tok)
                     end
                 end
+            end
+            -- Drive the plate's VISIBLE health every tick rather than relying only on
+            -- the engine's OnValueChanged. On some awesome_wotlk builds the bar STOPS
+            -- firing OnValueChanged once its texture is dropped (after the reaction
+            -- colour stabilises, just below) and the scrape (GetValue) can freeze with
+            -- it -- but a FrostAtom real "nameplateN" token still reports live health.
+            -- Prefer the real token, fall back to the scrape, and push a re-render only
+            -- when the value actually changed (free when idle, a no-op when
+            -- OnValueChanged already applied it). Without this the health bar + value
+            -- text froze at the spawn value ("health values not updating").
+            local rt = frame._realToken
+            local effCur, effMax
+            if rt and _UnitExists(rt) then
+                effCur, effMax = _UnitHealth(rt), _UnitHealthMax(rt)
+            else
+                effCur, effMax = frame._tpHP, frame._tpHPMax
+            end
+            if effCur ~= nil and (frame._tpLastPushHP ~= effCur or frame._tpLastPushMax ~= effMax)
+               and frame._tpAnnounced and frame._tpToken and ns.UpdateNameplateHealth then
+                frame._tpLastPushHP, frame._tpLastPushMax = effCur, effMax
+                ns.UpdateNameplateHealth(frame._tpToken)
             end
             if hb.GetStatusBarColor then
                 local key = ColorToReactionKey(hb:GetStatusBarColor())
@@ -1703,6 +1736,47 @@ if not HAVE_NATIVE_ENGINE then
         and type(C_NamePlate.GetNamePlateForUnit) == "function")
         and C_NamePlate.GetNamePlateForUnit or nil
 
+    -- awesome_wotlk token bridge: tag each managed frame with its real "nameplateN"
+    -- unit so the scrapers (PlateHealth / RefreshPlateScrape) can prefer live engine
+    -- health over the freezable bar scrape, and push an INSTANT re-render on the real
+    -- UNIT_HEALTH event. The DLL resolves the token to the SAME WorldFrame child we
+    -- manage, so the field lands on the frame the scrapers see. Fully optional: a
+    -- frame that never receives a token just stays on the scrape path. faTokenFrame
+    -- gives O(1) UNIT_HEALTH lookup and naturally ignores non-nameplate units.
+    if HAVE_AWESOME_WOTLK and _nativeGetNamePlateForUnit then
+        local faTokenFrame = {}
+        local faBridge = CreateFrame("Frame")
+        faBridge:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+        faBridge:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+        faBridge:RegisterEvent("UNIT_HEALTH")
+        faBridge:RegisterEvent("UNIT_MAXHEALTH")
+        faBridge:SetScript("OnEvent", function(_, event, unit)
+            if not unit then return end
+            if event == "NAME_PLATE_UNIT_ADDED" then
+                local f = _nativeGetNamePlateForUnit(unit)
+                if f then
+                    f._realToken = unit
+                    faTokenFrame[unit] = f
+                end
+            elseif event == "NAME_PLATE_UNIT_REMOVED" then
+                local f = faTokenFrame[unit]
+                if f and f._realToken == unit then
+                    f._realToken = nil
+                    f._tpLastPushHP, f._tpLastPushMax = nil, nil
+                end
+                faTokenFrame[unit] = nil
+            else  -- UNIT_HEALTH / UNIT_MAXHEALTH for a real nameplate token
+                local f = faTokenFrame[unit]
+                if f and f._tpAnnounced and f._tpToken and ns.UpdateNameplateHealth then
+                    -- Sync the scrape sweep's "last pushed" so its 0.1s backstop doesn't
+                    -- redundantly re-push the same value right after this instant one.
+                    f._tpLastPushHP, f._tpLastPushMax = _UnitHealth(unit), _UnitHealthMax(unit)
+                    ns.UpdateNameplateHealth(f._tpToken)
+                end
+            end
+        end)
+    end
+
     C_NamePlate = {}
     function C_NamePlate.GetNamePlateForUnit(unit)
         if not unit then return nil end
@@ -1830,6 +1904,26 @@ if not HAVE_NATIVE_ENGINE then
         end
         print("|cff4fa3ffTurboPlates|r plate dump  name="..tostring(PlateName(frame))
             .." level="..tostring(PlateLevel(frame)))
+        -- awesome_wotlk bridge status: confirms whether this plate is bound to a real
+        -- "nameplateN" token (so health comes from live UnitHealth, not the scrape).
+        local rt = frame._realToken
+        local mp2 = frame.myPlate
+        local rtOK = rt and _UnitExists(rt)
+        print(string.format("  awesome_wotlk=%s realToken=%s realHP=%s/%s scrapeHP=%s/%s barHP=%s/%s",
+            tostring(HAVE_AWESOME_WOTLK), tostring(rt),
+            rtOK and tostring(_UnitHealth(rt)) or "n/a",
+            rtOK and tostring(_UnitHealthMax(rt)) or "n/a",
+            tostring(frame._tpHP), tostring(frame._tpHPMax),
+            (mp2 and mp2.hp) and tostring(mp2.hp:GetValue()) or "n/a",
+            (mp2 and mp2.hp) and tostring(select(2, mp2.hp:GetMinMaxValues())) or "n/a"))
+        -- Read-only health/token diagnostic (awesome_wotlk): confirms the synthetic
+        -- token resolves to THIS myPlate. A nil/mismatched mapping is the "health bar
+        -- frozen" signature (UpdateHealth early-returns on it).
+        local tok = frame._tpToken
+        local mapped = tok and ns.unitToPlate and ns.unitToPlate[tok]
+        print("  token="..tostring(tok).." unitToPlate[token]="..tostring(mapped)
+            .." sameAsMyPlate="..tostring(mapped == mp2)
+            .." announced="..tostring(frame._tpAnnounced))
         print(string.format("  frame scale=%.3f effScale=%.3f size=%.0fx%.0f",
             frame:GetScale() or 0, frame:GetEffectiveScale() or 0,
             frame:GetWidth() or 0, frame:GetHeight() or 0))
@@ -1860,9 +1954,11 @@ if not HAVE_NATIVE_ENGINE then
 end
 
 ns.IS_WOTLK_COMPAT = not HAVE_NATIVE_ENGINE
+ns.HAVE_AWESOME_WOTLK = HAVE_AWESOME_WOTLK or false
 TurboPlatesWotlkCompat = {
     active         = not HAVE_NATIVE_ENGINE,
-    mode           = HAVE_NATIVE_ENGINE and "native" or "namebased-335",
+    mode           = HAVE_NATIVE_ENGINE and "native"
+                     or (HAVE_AWESOME_WOTLK and "namebased-335+awesome_wotlk" or "namebased-335"),
     awesomeWotlk   = HAVE_AWESOME_WOTLK or false,
     note           = "Backported to stock 3.3.5a by Jedborg",
 }

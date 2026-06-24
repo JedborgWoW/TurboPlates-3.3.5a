@@ -784,7 +784,11 @@ local function CreateCheckBox(parent, var, label, x, y, callback)
     local check = chk:CreateTexture(nil, "OVERLAY")
     check:SetSize(20, 20)
     check:SetPoint("CENTER")
-    check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+    -- Native checkmark texture. The old SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    -- is a RETAIL atlas that doesn't resolve on this 3.3.5a client (no ClassicAPI atlas
+    -- entry) -> the checked texture was BLANK, so the box never showed a tick even when
+    -- ticked (the setting still applied). UI-CheckBox-Check is native to 3.3.5a.
+    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     check:SetVertexColor(1, 0.82, 0)
     chk:SetCheckedTexture(check)
 
@@ -828,7 +832,8 @@ local function CreateCVarCheckBox(parent, cvar, label, x, y, callback)
     local check = chk:CreateTexture(nil, "OVERLAY")
     check:SetSize(20, 20)
     check:SetPoint("CENTER")
-    check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+    -- Native checkmark (see CreateCheckBox): the retail atlas was blank on 3.3.5a.
+    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     check:SetVertexColor(1, 0.8, 0)
     chk:SetCheckedTexture(check)
 
@@ -1392,6 +1397,11 @@ local function CreateScrollableDropdown(parent, var, label, options, x, y, callb
     -- Create option buttons
     for i, opt in ipairs(options) do
         local optBtn = CreateFrame("Button", nil, scrollChild)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 over the list puts the text on top.
+        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
         optBtn:SetSize(scrollChild:GetWidth() - 2, 18)
         optBtn:SetPoint("TOPLEFT", 1, -(i - 1) * itemHeight)
 
@@ -2862,7 +2872,7 @@ function ns:ToggleGUI()
     local ptCheck = previewToggle:CreateTexture(nil, "OVERLAY")
     ptCheck:SetSize(26, 26)
     ptCheck:SetPoint("CENTER")
-    ptCheck:SetAtlas("questlog-icon-checkmark-yellow-2x")
+    ptCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     ptCheck:SetSize(20, 20)
     ptCheck:SetVertexColor(1, 0.8, 0)
     previewToggle:SetCheckedTexture(ptCheck)
@@ -2903,7 +2913,7 @@ function ns:ToggleGUI()
     local mmCheck = mmToggle:CreateTexture(nil, "OVERLAY")
     mmCheck:SetSize(20, 20)
     mmCheck:SetPoint("CENTER")
-    mmCheck:SetAtlas("questlog-icon-checkmark-yellow-2x")
+    mmCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     mmCheck:SetVertexColor(1, 0.8, 0)
     mmToggle:SetCheckedTexture(mmCheck)
 
@@ -3142,23 +3152,24 @@ function ns:ToggleGUI()
     CreateSlider(p2, "hpHeight", L.HpHeight, 5, 50, 260, y - 110, false, nil, "px")
 
     -- Row 4: Scale & Target Scale sliders (display as percentage)
-    CreateSlider(p2, "scale", L.Scale, 0.5, 2.5, 20, y - 165, true, nil, "%", 100)
-    CreateSlider(p2, "targetScale", L.TargetScale, 0.5, 2.5, 260, y - 165, true, nil, "%", 100)
+    CreateSlider(p2, "scale", L.Scale, 0.5, 2.5, 20, y - 160, true, nil, "%", 100)
+    CreateSlider(p2, "targetScale", L.TargetScale, 0.5, 2.5, 260, y - 160, true, nil, "%", 100)
 
     -- Row 5: Friendly Scale & Pet Scale (display as percentage)
-    CreateSlider(p2, "friendlyScale", L.FriendlyScale, 0.5, 2.5, 20, y - 220, true, nil, "%", 100)
-    CreateSlider(p2, "petScale", L.PetScale, 0.3, 1.5, 260, y - 220, true, nil, "%", 100)
+    CreateSlider(p2, "friendlyScale", L.FriendlyScale, 0.5, 2.5, 20, y - 210, true, nil, "%", 100)
+    CreateSlider(p2, "petScale", L.PetScale, 0.3, 1.5, 260, y - 210, true, nil, "%", 100)
 
     -- Row 6: Raid Marker Anchor & Raid Marker Size
     local anchorOpts = {{name = L.RaidMarkerAnchorLeft, value = "LEFT"}, {name = L.RaidMarkerAnchorRight, value = "RIGHT"}, {name = L.RaidMarkerAnchorTop, value = "TOP"}}
-    CreateDropdown(p2, "raidMarkerAnchor", L.RaidMarkerAnchor, anchorOpts, 20, y - 275)
+    CreateDropdown(p2, "raidMarkerAnchor", L.RaidMarkerAnchor, anchorOpts, 20, y - 260)
+    CreateSlider(p2, "raidMarkerSize", L.RaidMarkerSize, 10, 40, 260, y - 260, false, nil, "px")
 
-    -- Row 7: Raid Marker Size & Raid Marker Y
-    CreateSlider(p2, "raidMarkerSize", L.RaidMarkerSize, 10, 40, 260, y - 275, false, nil, "px")
-    CreateSlider(p2, "raidMarkerY", L.RaidMarkerY, -50, 50, 20, y - 330, false, nil, "px")
+    -- Row 7: Raid Marker Y & Raid Marker X
+    CreateSlider(p2, "raidMarkerY", L.RaidMarkerY, -50, 50, 20, y - 310, false, nil, "px")
+    CreateSlider(p2, "raidMarkerX", L.RaidMarkerX, -50, 50, 260, y - 310, false, nil, "px")
 
-    -- Row 8: Raid Marker X
-    CreateSlider(p2, "raidMarkerX", L.RaidMarkerX, -50, 50, 260, y - 330, false, nil, "px")
+    -- Row 8: Nameplate Vertical Offset (shifts the whole plate up/down off the mob)
+    CreateSlider(p2, "plateYOffset", L.PlateYOffset, -30, 50, 20, y - 360, false, nil, "px")
 
     -- TAB 3: Fonts
     local p3 = guiPage[3]
@@ -3690,7 +3701,7 @@ function ns:ToggleGUI()
         local check = chk:CreateTexture(nil, "OVERLAY")
         check:SetSize(20, 20)
         check:SetPoint("CENTER")
-        check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
         check:SetVertexColor(1, 0.82, 0)
         chk:SetCheckedTexture(check)
 
@@ -3888,11 +3899,6 @@ function ns:ToggleGUI()
             -- Raise above the list's opaque background (see CreateDropdown): child
             -- text was rendering behind the parent BACKGROUND on this client.
             optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
-        -- Raise above the list's opaque background: on this 3.3.5a client a child
-        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
-        -- option labels were invisible (but still clickable). Frame level is the
-        -- authoritative draw order, so +1 puts the text on top.
-        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
             optBtn:SetSize(214, 18)
             optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
@@ -4062,7 +4068,7 @@ function ns:ToggleGUI()
     local ownOnlyCheck = ownOnlyCB:CreateTexture(nil, "OVERLAY")
     ownOnlyCheck:SetSize(20, 20)
     ownOnlyCheck:SetPoint("CENTER")
-    ownOnlyCheck:SetAtlas("questlog-icon-checkmark-yellow-2x")
+    ownOnlyCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     ownOnlyCheck:SetVertexColor(1, 0.82, 0, 0.5)  -- Dimmed gold
     ownOnlyCB:SetCheckedTexture(ownOnlyCheck)
     ownOnlyCB:SetChecked(true)
@@ -4220,7 +4226,7 @@ function ns:ToggleGUI()
         local check = chk:CreateTexture(nil, "OVERLAY")
         check:SetSize(20, 20)
         check:SetPoint("CENTER")
-        check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
         check:SetVertexColor(1, 0.82, 0)
         chk:SetCheckedTexture(check)
 
@@ -4407,11 +4413,6 @@ function ns:ToggleGUI()
             -- Raise above the list's opaque background (see CreateDropdown): child
             -- text was rendering behind the parent BACKGROUND on this client.
             optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
-        -- Raise above the list's opaque background: on this 3.3.5a client a child
-        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
-        -- option labels were invisible (but still clickable). Frame level is the
-        -- authoritative draw order, so +1 puts the text on top.
-        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
             optBtn:SetSize(214, 18)
             optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
@@ -4494,7 +4495,7 @@ function ns:ToggleGUI()
         local check = chk:CreateTexture(nil, "OVERLAY")
         check:SetSize(20, 20)
         check:SetPoint("CENTER")
-        check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
         check:SetVertexColor(1, 0.82, 0)
         chk:SetCheckedTexture(check)
 
@@ -4763,7 +4764,7 @@ function ns:ToggleGUI()
         local check = chk:CreateTexture(nil, "OVERLAY")
         check:SetSize(20, 20)
         check:SetPoint("CENTER")
-        check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
         check:SetVertexColor(1, 0.82, 0)
         chk:SetCheckedTexture(check)
 
@@ -5016,6 +5017,11 @@ function ns:ToggleGUI()
 
     for i, opt in ipairs(presetOpts) do
         local optBtn = CreateFrame("Button", nil, presetList)
+        -- Raise above the list's opaque background: on this 3.3.5a client a child
+        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
+        -- option labels were invisible (but still clickable). Frame level is the
+        -- authoritative draw order, so +1 puts the text on top.
+        optBtn:SetFrameLevel(presetList:GetFrameLevel() + 1)
         optBtn:SetSize(174, 18)
         optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
@@ -5171,7 +5177,7 @@ function ns:ToggleGUI()
         local check = chk:CreateTexture(nil, "OVERLAY")
         check:SetSize(20, 20)
         check:SetPoint("CENTER")
-        check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
         check:SetVertexColor(1, 0.82, 0)
         chk:SetCheckedTexture(check)
 
@@ -5358,11 +5364,6 @@ function ns:ToggleGUI()
             -- Raise above the list's opaque background (see CreateDropdown): child
             -- text was rendering behind the parent BACKGROUND on this client.
             optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
-        -- Raise above the list's opaque background: on this 3.3.5a client a child
-        -- frame's text was rendering BEHIND the parent's BACKGROUND texture, so the
-        -- option labels were invisible (but still clickable). Frame level is the
-        -- authoritative draw order, so +1 puts the text on top.
-        optBtn:SetFrameLevel(list:GetFrameLevel() + 1)
             optBtn:SetSize(214, 18)
             optBtn:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 20)
 
@@ -5680,7 +5681,7 @@ function ns:ToggleGUI()
             local check = chk:CreateTexture(nil, "OVERLAY", nil, 7)
             check:SetSize(20, 20)
             check:SetPoint("CENTER")
-            check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+            check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
             check:SetVertexColor(1, 0.82, 0)
             check:SetDrawLayer("OVERLAY", 7)
             check:Hide()
@@ -6167,7 +6168,7 @@ function ns:ToggleGUI()
         local check = chk:CreateTexture(nil, "OVERLAY")
         check:SetSize(20, 20)
         check:SetPoint("CENTER")
-        check:SetAtlas("questlog-icon-checkmark-yellow-2x")
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
         check:SetVertexColor(1, 0.82, 0)
         chk:SetCheckedTexture(check)
 

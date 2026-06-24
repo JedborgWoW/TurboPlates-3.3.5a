@@ -287,6 +287,7 @@ local T = {
     Font = "Fuente",
     FontSize = "Tamaño nombre",
     NameTextYOffset = "Nombre Y",
+    PlateYOffset = "Desplazamiento vertical",
     FontOutline = "Contorno",
     NameDisplayFormat = "Formato nombre",
     HealthValueFormat = "Formato vida",
