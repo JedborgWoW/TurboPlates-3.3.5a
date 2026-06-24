@@ -3756,6 +3756,14 @@ end
 
 -- Check if player is Protection Warrior (most points in Protection tree = tree 3)
 local function IsProtectionWarrior()
+    -- The "3rd tab = Protection" assumption only holds for warriors. Without this
+    -- guard any class whose 3rd talent tab is its highest gets flagged as a tank
+    -- (Frost mage, Ret paladin, Unholy DK, Resto druid, Shadow priest, Destro
+    -- lock, Sub rogue), which on stock 3.3.5a paints tank aggro colour whenever a
+    -- mob hits them. Class token is locale-independent.
+    local _, class = UnitClass("player")
+    if class ~= "WARRIOR" then return false end
+
     local numTabs = GetNumTalentTabs()
     if numTabs < 3 then return false end
 

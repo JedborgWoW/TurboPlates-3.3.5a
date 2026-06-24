@@ -19,6 +19,13 @@ contributor PR from a tester (JulesPeace).
   stock-WOTLK 30-min aura `50720` that actually sits on the party member (what
   `UnitBuff` returns), and the `50725` proc id — so detection works regardless of
   platform and neither one loses Vigilance support.
+- **Fixed non-warriors being auto-detected as tanks on stock 3.3.5a.** The
+  player-is-tank check keyed off "most points in the 3rd talent tab" — which is
+  Protection only for warriors. A Frost mage (and Ret paladin, Unholy DK, Resto
+  druid, Shadow priest, Destro lock, Sub rogue) was therefore flagged as a tank,
+  and since the stock threat fallback treats "a mob is hitting you" as full
+  aggro, every incoming attack painted the tank "secure aggro" colour. The check
+  now requires the WARRIOR class.
 
 ### Castbars
 - **Fixed false cast bars on stock 3.3.5a** (no awesome_wotlk) where a mob
