@@ -3654,13 +3654,17 @@ local group = {
 -- Tank aura spell IDs for Ascension (Level 60 custom)
 -- Used when LFG roles aren't available (manual groups)
 local TANK_AURAS = {
-    [1182001] = true,  -- Shaman tank buff
-    [1109634] = true,  -- Druid Bear Form
-    [1125780] = true,  -- Paladin Righteous Fury
+    [1182001] = true,  -- Ascension Shaman tank buff
+    [1109634] = true,  -- Ascension Druid Bear Form
+    [1125780] = true,  -- Ascension Paladin Righteous Fury
+	[9634] = true,     -- WOTLK Druid Baer Form
+	[25780] = true,    -- WOTLK Paladin Righteous Fury
+	[48263] = true,    -- WOTLK Death Knight Frost Presence
 }
 
 -- Vigilance spell ID - cast BY warrior tank ON party member
-local VIGILANCE_SPELL_ID = 1150720
+-- local VIGILANCE_SPELL_ID = 1150720 -- Ascension SpellID TODO: Logic that determines that you're on Ascension for Ascension compatibility
+local VIGILANCE_SPELL_ID = 50725
 
 -- Vigilance caster cache
 local cachedVigilanceCaster = nil
@@ -3792,7 +3796,7 @@ local function UpdatePlayerTankStatus()
         return
     end
 
-    -- Priority 3: Check tank auras (Shaman/Druid/Paladin)
+    -- Priority 3: Check tank auras (Shaman/Druid/Paladin/Deathknight)
     if HasTankAura("player") then
         group.playerIsTank = true
         return
