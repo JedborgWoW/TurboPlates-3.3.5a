@@ -3,7 +3,7 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
-## [1.4.6-335] — 2026-06-24
+## [1.4.6] — 2026-06-24
 
 Fixes auto/smart **tank mode** detection on stock 3.3.5a (WOTLK), based on a
 contributor PR from a tester (JulesPeace).
