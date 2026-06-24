@@ -844,6 +844,35 @@ if not HAVE_NATIVE_ENGINE then
         return nil
     end
 
+    -- True when `guid` is claimed by a plate OTHER than the one holding `exceptToken`,
+    -- so that plate's pinnedGUID == guid is STALE. A plate can keep a pin from a
+    -- transient WRONG bind to a same-named mob's unit (two identical mobs both full HP
+    -- when you target one -> a twin gets bound + pinned, then the alpha/lenient
+    -- correction moves the binding but the pin persists across unbind by design). The
+    -- real mob is then shown on another plate - either BOUND to its unit (matched by
+    -- exact HP -> authoritative) or also PINNED to it (ambiguous: can't tell twins
+    -- apart without a token, so both suppress, which beats bleeding onto the wrong one).
+    -- This only VALIDATES the pin at read time; it never clears it (clearing was
+    -- reverted - it broke the persist design). Stock-relevant: on awesome_wotlk the
+    -- exact GUID bind keeps the pin correct and the _realToken debuff path runs first.
+    function ns.IsPinnedGUIDStale(guid, exceptToken)
+        if not guid then return false end
+        -- (1) bound elsewhere by exact HP = authoritative; any other pin to it is stale.
+        for _, frame in pairs(matchUnitToPlate) do
+            if frame._tpMatchedGUID == guid and frame._tpToken ~= exceptToken then
+                return true
+            end
+        end
+        -- (2) another visible plate is also pinned to it -> ambiguous, both suppress.
+        for frame in pairs(managedPlates) do
+            if frame._tpToken ~= exceptToken and frame:IsShown() then
+                local mp = frame.myPlate
+                if mp and mp.pinnedGUID == guid then return true end
+            end
+        end
+        return false
+    end
+
     -- DISPLAY DATA IS SCRAPED, NOT TAKEN FROM THE MATCHED TOKEN.
     -- This follows how NotPlater works on real 3.3.5a: the plate's own regions
     -- (name/level FontStrings, health-bar value + colour) are the source of truth

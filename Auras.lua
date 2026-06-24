@@ -1162,6 +1162,17 @@ local function PinSignatureValid(myPlate, name, unit)
         local cl = UnitLevel(unit)
         if cl and cl > 0 and cl ~= pl then return false end
     end
+    -- Stale-pin guard: a plate can keep a pinnedGUID from a transient WRONG bind to a
+    -- same-named mob's unit (target two identical full-HP mobs; the engine binds +
+    -- pins a twin, then the alpha/lenient correction moves the binding but the pin
+    -- persists across unbind by design). The real mob is then shown on ANOTHER plate
+    -- (bound by exact HP, or pinned), so this plate's pin is stale - reject it so the
+    -- CLEU debuff (e.g. a Polymorph on your target) doesn't bleed onto the twin. This
+    -- was the stock same-named ICON bleed. No-op on awesome_wotlk (the _realToken
+    -- branch returns before this) and for a uniquely-pinned mob (the normal case).
+    if ns.IsPinnedGUIDStale and ns.IsPinnedGUIDStale(myPlate.pinnedGUID, unit) then
+        return false
+    end
     return true
 end
 
