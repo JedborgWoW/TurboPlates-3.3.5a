@@ -20,7 +20,8 @@ quest icons, and the options UI.
 - **awesome_wotlk integration:** plates are pre-announced on
   `NAME_PLATE_UNIT_ADDED` so WeakAuras and other addons anchor correctly, and
   the addon now runs cleanly both **with and without** the DLL.
-- Added a configurable **nameplate vertical offset** (plate Y offset).
+- Added configurable **nameplate X and Y position offsets** to move the whole
+  plate off the mob — in the **General** tab, matching Ascension's layout.
 
 ### Same-named mobs (no more "bleed" between identical plates)
 - **Fixed debuffs and health-bar colour bleeding onto a same-named neighbour.**

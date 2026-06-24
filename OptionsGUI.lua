@@ -2807,7 +2807,7 @@ function ns:ToggleGUI()
 
     -- Main frame (670x500)
     guiFrame = CreateFrame("Frame", "TurboPlatesGUI", UIParent)
-    guiFrame:SetSize(670, 500)
+    guiFrame:SetSize(670, 545)
     guiFrame:SetPoint("CENTER")
     guiFrame:SetFrameStrata("HIGH")
     guiFrame:SetFrameLevel(10)
@@ -3147,6 +3147,10 @@ function ns:ToggleGUI()
     }
     CreateDropdown(p1, "healerMarks", L.HealerMarks, healerMarksOpts, 260, y - 320)
 
+    -- Whole-plate position offset (X left, Y right) -- matches Ascension's General layout
+    CreateSlider(p1, "plateXOffset", L.PlateXOffset, -50, 50, 20, y - 375, false, nil, "px")
+    CreateSlider(p1, "plateYOffset", L.PlateYOffset, -50, 50, 260, y - 375, false, nil, "px")
+
     -- TAB 2: Style (Sizes & Textures)
     local p2 = guiPage[2]
     y = -10
@@ -3179,9 +3183,6 @@ function ns:ToggleGUI()
     -- Row 7: Raid Marker Y & Raid Marker X
     CreateSlider(p2, "raidMarkerY", L.RaidMarkerY, -50, 50, 20, y - 310, false, nil, "px")
     CreateSlider(p2, "raidMarkerX", L.RaidMarkerX, -50, 50, 260, y - 310, false, nil, "px")
-
-    -- Row 8: Nameplate Vertical Offset (shifts the whole plate up/down off the mob)
-    CreateSlider(p2, "plateYOffset", L.PlateYOffset, -30, 50, 20, y - 360, false, nil, "px")
 
     -- TAB 3: Fonts
     local p3 = guiPage[3]

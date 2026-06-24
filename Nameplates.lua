@@ -375,6 +375,7 @@ function ns:UpdateDBCache()
     ns.c_healthValueFormat = db.healthValueFormat or "none"
     ns.c_healthValueFontSize = db.healthValueFontSize or 10
     ns.c_nameTextYOffset = db.nameTextYOffset or 0
+    ns.c_plateXOffset = db.plateXOffset or 0
     ns.c_plateYOffset = db.plateYOffset or 0
     ns.c_nameInHealthbar = db.nameInHealthbar == true  -- Default to false
     ns.c_hidePercentWhenFull = db.hidePercentWhenFull == true  -- Default to false (show 100%)
@@ -553,6 +554,7 @@ function ns:UpdateDBCache()
             -- Dimension caches
             myPlate._lastWidth = nil
             myPlate._lastHpHeight = nil
+            myPlate._lastPlateX = nil
             myPlate._lastPlateY = nil
             myPlate._lastBgAlpha = nil
             myPlate._lastBorderShown = nil
@@ -1290,7 +1292,7 @@ local function EnsureFullPlate(myPlate)
     if myPlate.hp then return end  -- Already has health bar
 
     local hp = CreateFrame("StatusBar", nil, myPlate)
-    PixelUtil.SetPoint(hp, "CENTER", myPlate, "CENTER", 0, -3 + (ns.c_plateYOffset or 0), 1, 1)
+    PixelUtil.SetPoint(hp, "CENTER", myPlate, "CENTER", (ns.c_plateXOffset or 0), -3 + (ns.c_plateYOffset or 0), 1, 1)
     hp:EnableMouse(false)  -- Pass through clicks
     hp:Hide()  -- Start hidden
 
@@ -2823,12 +2825,13 @@ function ns:UpdatePlateStyle(myPlate)
                 myPlate._lastHpHeight = ns.c_hpHeight
             end
 
-            -- Whole-plate vertical offset: re-anchor the health bar within myPlate.
-            -- Every other element (name, castbar, power, combo points, debuffs) anchors
-            -- to hp, so shifting hp lifts the entire plate off the mob together.
-            if myPlate._lastPlateY ~= ns.c_plateYOffset then
-                PixelUtil.SetPoint(myPlate.hp, "CENTER", myPlate, "CENTER", 0, -3 + (ns.c_plateYOffset or 0), 1, 1)
+            -- Whole-plate X/Y offset: re-anchor the health bar within myPlate. Every
+            -- other element (name, castbar, power, combo points, debuffs) anchors to hp,
+            -- so shifting hp moves the entire plate off the mob together.
+            if myPlate._lastPlateY ~= ns.c_plateYOffset or myPlate._lastPlateX ~= ns.c_plateXOffset then
+                PixelUtil.SetPoint(myPlate.hp, "CENTER", myPlate, "CENTER", (ns.c_plateXOffset or 0), -3 + (ns.c_plateYOffset or 0), 1, 1)
                 myPlate._lastPlateY = ns.c_plateYOffset
+                myPlate._lastPlateX = ns.c_plateXOffset
             end
         end
 
