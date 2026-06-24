@@ -1205,6 +1205,29 @@ local function MergeTrackedDebuffs(myPlate, unit, collector)
     local seen = seenScratch
     wipe(seen)
 
+    -- awesome_wotlk: when the DLL gives this plate a real "nameplateN" token it resolves
+    -- to the EXACT mob, even though the name+health match hasn't bound it. Read THAT
+    -- mob's tracked debuffs by its real GUID alone - exact, so a single-target Sap can't
+    -- bleed onto a same-named neighbour, and we skip the ambiguity-suppressing name
+    -- fallback below entirely (no twin guessing when the DLL can tell them apart). nil
+    -- entry => no tracked debuff on this mob => show nothing. On stock 3.3.5a (no DLL)
+    -- GetPlateRealToken is nil and we fall through to the pin/name paths unchanged.
+    local rt = ns.GetPlateRealToken and ns.GetPlateRealToken(unit)
+    if rt then
+        local g = cleuByGUID[UnitGUID(rt)]
+        if g then
+            for spellID, s in pairs(g.spells) do
+                local dur = durationBySpell[spellID]
+                if dur and s.applied + dur <= now then
+                    g.spells[spellID] = nil  -- learned duration elapsed
+                else
+                    AddTrackedSpell(collector, spellID, s, now, seen)
+                end
+            end
+        end
+        return
+    end
+
     -- PRIMARY: pinned GUID. This plate is unbound, so its pin can't be the current
     -- target's GUID (that would have bound it) - no exclusion needed.
     if PinSignatureValid(myPlate, name, unit) then
