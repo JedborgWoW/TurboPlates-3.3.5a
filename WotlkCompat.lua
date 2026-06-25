@@ -1590,18 +1590,41 @@ if not HAVE_NATIVE_ENGINE then
             local si = frame._tpSpellIcon
             if si and si.IsShown and si:IsShown() and si.Hide then si:Hide() end
             local info
-            if active and not frame._tpMatchedUnit then
+            -- The match tracker binds plates to target/focus/mouseover AND to every
+            -- party/raid member's target (partyNtarget/raidNtarget, see trackedUnits).
+            -- The event-driven castbar path (UNIT_SPELLCAST_*) only fires for the first
+            -- group, so a plate bound to a partyNtarget/raidNtarget pseudo-unit used to
+            -- get a castbar from NEITHER path: this CLEU mirror skipped every matched
+            -- plate, yet no UNIT_SPELLCAST event ever fires for those units ("no cast on
+            -- a mob I don't target/mouseover", worst in dungeons/raids where every mob is
+            -- some party member's target; awesome_wotlk's exact-GUID bind (ac9a2f6) made
+            -- it obvious by binding those plates reliably). Drive the mirror for matched
+            -- plates too, EXCEPT the ones the event path owns (target/focus/mouseover) -
+            -- driving those here would fight the event path over the same bar.
+            local mu = frame._tpMatchedUnit
+            local eventOwnsCast = (mu == "target" or mu == "focus" or mu == "mouseover")
+            if active and not eventOwnsCast then
                 local mp = frame.myPlate
                 local pname = PlateName(frame)
-                -- awesome_wotlk: this plate carries a real FrostAtom "nameplateN" token
-                -- that resolves to the EXACT mob it shows, so match the cast by that
-                -- mob's real GUID. This is what lets awesome_wotlk show untargeted casts
-                -- on ANY plate without bleeding onto same-named neighbours (one Murkgill
-                -- Oracle casting Lightning Bolt, three standing by; two Sifreldar Storm
-                -- Maidens, one casting): the DLL token disambiguates twins exactly.
-                -- nil castByGUID[rg] => this mob isn't casting => no bar.
                 local rt = frame._realToken
-                if rt and _UnitExists(rt) then
+                if mu then
+                    -- Matched to a partyNtarget/raidNtarget REAL unit: resolve the cast
+                    -- by that mob's exact GUID. Base WoW (UnitGUID + CLEU castByGUID), no
+                    -- DLL needed, so it works on stock AND awesome_wotlk - exact on
+                    -- awesome_wotlk (the bind is GUID-exact), and as-exact-as-the-bind on
+                    -- stock, matching how debuffs/auras already read UnitAura(matchedUnit)
+                    -- on a bound plate. Fixes "castbar doesn't show on a mob I haven't
+                    -- targeted/moused-over" in groups.
+                    local g = _UnitGUID(mu)
+                    info = g and castByGUID[g] or nil
+                elseif rt and _UnitExists(rt) then
+                    -- awesome_wotlk: this plate carries a real FrostAtom "nameplateN" token
+                    -- that resolves to the EXACT mob it shows, so match the cast by that
+                    -- mob's real GUID. This is what lets awesome_wotlk show untargeted casts
+                    -- on ANY plate without bleeding onto same-named neighbours (one Murkgill
+                    -- Oracle casting Lightning Bolt, three standing by; two Sifreldar Storm
+                    -- Maidens, one casting): the DLL token disambiguates twins exactly.
+                    -- nil castByGUID[rg] => this mob isn't casting => no bar.
                     local rg = _UnitGUID(rt)
                     info = rg and castByGUID[rg] or nil
                 else

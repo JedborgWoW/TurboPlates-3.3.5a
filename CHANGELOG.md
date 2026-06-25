@@ -13,6 +13,18 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
   moused over or targeted it. TurboPlates now matches the full creature name, so
   the icon only appears on the mob the quest is actually for.
 
+### Castbars
+- **Fixed missing cast bars on mobs you haven't targeted, in groups/raids (both
+  stock 3.3.5a and awesome_wotlk).** A casting mob that you weren't targeting or
+  mousing over often showed no cast bar — most noticeably in dungeons and raids.
+  The cause: TurboPlates also tracks each party/raid member's target, and once a
+  plate was bound to one of those, it was treated as "handled by the event path"
+  — but the game never sends cast events for another player's target, so the bar
+  appeared nowhere. Those plates now get their cast from the combat log by the
+  mob's exact GUID, so the bar shows on the correct mob. Plates you target, focus
+  or mouse over are unchanged (still driven by the normal cast events), and the
+  exact, no-bleed behaviour on awesome_wotlk is preserved.
+
 ## [1.4.6] — 2026-06-24
 
 Fixes auto/smart **tank mode** detection on stock 3.3.5a (WOTLK), based on a
