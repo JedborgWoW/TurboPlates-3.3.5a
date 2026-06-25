@@ -165,21 +165,49 @@ instead reads the exact `_realToken`, so twins are never confused.)
 
 ### Cast bars (`ProcessPlateCasts`, in `WotlkCompat.lua`)
 
-> Stock 3.3.5a does **not** engine-drive the Blizzard nameplate cast bar — there
-> is nothing to scrape, so don't try. (An early scrape-the-Blizzard-bar attempt
-> showed nothing on stock for exactly this reason.)
+> **Stock** 3.3.5a does **not** engine-drive the Blizzard nameplate cast bar, so
+> there is nothing to scrape — an early scrape-the-bar attempt showed nothing for
+> exactly this reason. We drive cast bars from the **combat log** instead (below),
+> so untargeted casts *do* work on stock. *awesome_wotlk* **does** drive the bar,
+> which is why we also suppress its leaking spell icon (note at the end).
 
-`SPELL_CAST_START` fires for every caster in range. We cache the spell **name**,
-**icon** and base **cast time** (`GetSpellInfo`'s 7th return, ms) keyed by GUID
-and by caster name, then `ProcessPlateCasts` (every frame in the driver) renders
-a **self-animating** bar via the `ns:ScrapeCast*` API — no unit, no Blizzard bar
+`SPELL_CAST_START` fires for every caster in range with no unitID. We cache the
+spell **name**, **icon** and base **cast time** (`GetSpellInfo`'s 7th return, ms),
+keyed by GUID, then `ProcessPlateCasts` (every frame in the driver) renders a
+**self-animating** bar via the `ns:ScrapeCast*` API — no unit, no Blizzard bar
 needed. The real `SPELL_CAST_SUCCESS` / `FAILED` / `INTERRUPT` clears it (a 0.5s
 grace + a periodic sweep cap a missed end event).
 
-Plate identity for a cast: **`_realToken` GUID** (awesome_wotlk, exact) →
-**pinned GUID** (stock, validated not-stale) → **unique visible name**
-(`CountVisiblePlatesByName <= 1`) → **nothing**. There is no name-union "show on
-all same-named" path — that bled onto every twin and was removed.
+**Which plates the mirror drives — "matched" ≠ "event-covered".** The normal
+`UNIT_SPELLCAST_*` event path only answers for `target` / `focus` / `mouseover` /
+`player` / `pet` / party-and-raid **members** — **never their targets.** But the
+match tracker also binds each `partyNtarget` / `raidNtarget` (the mob a group
+member is fighting). An older gate excluded *all* matched plates from the mirror,
+so a plate bound to a party/raid member's target got a cast bar from **neither**
+path — a dead zone, worst in dungeons/raids where every mob is some member's
+target. The resolution ladder is now:
+
+| Plate | Cast source |
+|---|---|
+| matched → `target` / `focus` / `mouseover` | event path (`UNIT_SPELLCAST_*`) |
+| matched → `partyN` / `raidNtarget` | `castByGUID[UnitGUID(matchedUnit)]` — exact |
+| unmatched, **awesome_wotlk** | `castByGUID[UnitGUID(_realToken)]` — exact |
+| unmatched, **stock** | **pinned GUID only** (nothing if never pinned) |
+
+There is **no name-union** "show on all same-named" path (it bled onto every twin)
+and, for casts, **no unique-name fallback** either: a stock mob you've never
+targeted/moused-over simply shows no cast bar, because there's no reliable way to
+tie an untargeted cast to one of several identical plates. (Debuffs *do* keep a
+unique-name fallback — a debuff is persistent, so a lone same-named add still
+showing its DoT is worth more than the precision a transient cast needs.)
+
+> ⚠️ **awesome_wotlk spell-icon leak.** Because the engine drives the cast bar
+> there, it re-shows the Blizzard nameplate's own spell icon (`_tpSpellIcon`)
+> **C-side**, bypassing the one-time Hide hook — it leaked as a stray icon at the
+> un-offset mob position (visible once the plate has an X/Y offset).
+> `ProcessPlateCasts` re-hides that icon (and re-drops the bar texture) every
+> frame to keep it suppressed; the texture stays readable for the icon. No-op on
+> stock, where the engine never shows it.
 
 ### Debuff icons (`MergeTrackedDebuffs`, in `Auras.lua`)
 
@@ -198,7 +226,9 @@ and merged in. Two non-obvious points:
   `HARMFUL|PLAYER` doesn't enumerate pet auras.)
 
 Identity ladder (stock): pinned GUID (validated not-stale) → unique-name
-(`CountPlatesWithName == 1`) → nothing. Same shape as casts.
+(`CountPlatesWithName == 1`) → nothing. Unlike casts, debuffs **keep** the
+unique-name fallback: a debuff is persistent, so a lone same-named add still
+showing its DoT is worth more than the wrong-twin risk a transient cast carries.
 
 ### Threat / aggro colour (`ThreatAggro.lua`)
 
@@ -209,6 +239,20 @@ CLEU damage/miss subevents where `destGUID == playerGUID` (keyed by GUID + name,
 5s decay + combat-exit wipe) and exposes `ns.PlayerHasAggroFrom`. `UpdateColor`
 consults it **only when the threat API returned nil** — a real status always
 wins, so a group cleave that incidentally hits you isn't mis-coloured.
+
+Two scope rules keep this honest:
+
+- **Only in a group/raid, or with a pet.** The fallback forces "full aggro" for
+  an unbound plate, which is meaningless when nothing competes for threat — solo
+  it painted every attacker the threat colour. It now applies only when there's
+  actually a threat contest (party/raid or a pet), matching the threat *text*
+  (already hidden solo) and awesome_wotlk. Solo with no pet, hostile mobs use the
+  normal hostile colour.
+- **The colour follows your role.** Tank → the "secure aggro" colour, DPS → the
+  DPS aggro colour. Role is auto-detected; the stock prot-spec heuristic ("most
+  points in the 3rd talent tab") is gated to the **WARRIOR** class, so a Frost
+  mage / Ret paladin / etc. is no longer mis-flagged as a tank (which then painted
+  every incoming hit the tank colour).
 
 > This had to be a **new file**: `Nameplates.lua` is already at Lua 5.1's
 > 200-locals-per-function limit. **Do not add top-level locals to
@@ -338,11 +382,14 @@ the combat log — not just on your target/focus/mouseover. On **awesome_wotlk**
 this is exact for every plate via `_realToken`.
 
 **The irreducible limit** is on **stock** clients only: 2+ *identical* same-named
-mobs at the same health can't be told apart without a token, so a per-plate
-cast/debuff is **suppressed** (shown on none) rather than risk bleeding onto the
-wrong twin. It resolves the instant you target/mouseover one (which pins it) or
-their health diverges. This is the same ceiling every nameplate addon hits on a
-stock client; installing awesome_wotlk removes it entirely.
+mobs at the same health can't be told apart without a token, so per-plate extras
+are **suppressed** rather than risk bleeding onto the wrong twin. A **debuff**
+still shows on the *unique* same-named plate (or one you've pinned by
+targeting/mousing over); a **cast** shows only on a plate you've pinned that way —
+otherwise nothing. It all resolves the instant you target/mouseover one (which
+pins it) or their health diverges. This is the same ceiling every nameplate addon
+hits on a stock client; installing awesome_wotlk removes it entirely (every plate
+is exact, via `_realToken`).
 
 ---
 
