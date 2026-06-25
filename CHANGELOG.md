@@ -3,6 +3,22 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
+## [1.4.6] — 2026-06-25
+
+### Quest icons
+- **Fixed a false quest icon on a mob whose name is a suffix of the quest mob's
+  name.** With "Frenzied Pterrordax slain: 0/10" in the log, the plain mob
+  "Pterrordax" was shown with a quest objective icon, because the passive name
+  match searched for the plate name as a *substring* anywhere in the objective
+  line — and "Pterrordax" is a substring of "Frenzied Pterrordax". The icon
+  also never cleared on mouseover/target, since the tooltip scan (which
+  correctly found no objective) was overridden by the bad name match. The match
+  is now **anchored to the start** of the objective line, where the tracked
+  creature/item name always appears in every locale ("MobName slain: x/y",
+  "MobName getötet: x/y", "MobName：已击杀 x/y"), with a trailing word-boundary
+  check. A plate only matches when its name *is* the tracked name, not merely
+  the tail of a longer one.
+
 ## [1.4.6] — 2026-06-24
 
 Fixes auto/smart **tank mode** detection on stock 3.3.5a (WOTLK), based on a

@@ -5103,19 +5103,35 @@ local function UnitTooltipQuestKey(realUnit)
     return key
 end
 
--- (3) Name match: a plate is a quest target if its name is a substring of an
--- in-progress objective (locale-independent: the mob name appears verbatim in
--- "MobName slain: 3/10"). Works on unbound plates (no tooltip).
+-- (3) Name match: a plate is a quest target if its name is the tracked creature/
+-- item name at the START of an in-progress objective. The name is anchored to the
+-- start of the line in every locale ("MobName slain: 3/10", "MobName getötet: 3/10",
+-- "MobName：已击杀 3/10"), so we MUST anchor there rather than a free substring:
+-- a plain substring match flags a plate whose name is only a SUFFIX of the real
+-- mob name ("Pterrordax" inside the quest mob "Frenzied Pterrordax"). Works on
+-- unbound plates (no tooltip).
 local function PlateNameMatchesQuest(plateName)
     if not plateName or plateName == "" then return false end
     if questCacheDirty then RebuildQuestObjectiveCache() end
     local cached = questNameMatchCache[plateName]
     if cached ~= nil then return cached end
     local result = false
+    local nlen = #plateName
     for i = 1, #questObjectiveTexts do
-        if questObjectiveTexts[i]:find(plateName, 1, true) then
-            result = true
-            break
+        local text = questObjectiveTexts[i]
+        -- Anchor at the start: the objective line must BEGIN with the plate name.
+        if text:sub(1, nlen) == plateName then
+            -- Trailing boundary: reject when the next byte continues a Latin word
+            -- (letter/digit), i.e. the plate name is only a prefix of a longer
+            -- first word ("Frenz" vs "Frenzied"). nil = end-of-string = a match.
+            local after = text:byte(nlen + 1)
+            if not after
+               or not ((after >= 48 and after <= 57)        -- 0-9
+                    or (after >= 65 and after <= 90)         -- A-Z
+                    or (after >= 97 and after <= 122)) then  -- a-z
+                result = true
+                break
+            end
         end
     end
     questNameMatchCache[plateName] = result
