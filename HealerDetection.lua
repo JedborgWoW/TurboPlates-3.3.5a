@@ -19,7 +19,6 @@ local unpack = unpack
 local bit_band = bit.band
 local CreateFrame = CreateFrame
 local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
-local C_NamePlate = C_NamePlate
 local PixelUtil = PixelUtil
 
 -- =============================================================================
@@ -185,22 +184,35 @@ local function OnCombatLogEvent(...)
     ns:RefreshHealerPlates(sourceGUID)
 end
 
--- Refresh all plates that match a GUID (both full and lite plates)
+-- Refresh all plates that match a GUID (both full and lite plates).
+-- Iterate the manager's ACTIVE plates rather than raw "nameplateN" unit tokens: those
+-- tokens only exist on a token engine (Ascension / awesome_wotlk), so the old
+-- GetNamePlateForUnit("nameplate"..i) loop was DEAD on stock 3.3.5a - a just-detected
+-- healer's icon never refreshed until the next per-plate update. EnumerateActiveNamePlates
+-- is provided by the WotlkCompat shim on stock too, so this works on all three engines.
+-- Per plate, resolve the unit preferring its real "nameplateN" token when the DLL is
+-- present (GetPlateRealToken -> exact GUID even for unbound plates, preserving the old
+-- awesome_wotlk behaviour); else the synthetic token, which UnitGUID resolves to the
+-- matched/pinned GUID (so bound/pinned plates match on stock, and the unbound-twin case
+-- degrades gracefully to the next per-plate update via FullPlateUpdate).
 function ns:RefreshHealerPlates(guid)
-    for i = 1, 40 do
-        local unit = "nameplate" .. i
-        local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
-        if nameplate then
-            local plateGUID = UnitGUID(unit)
-            if plateGUID == guid then
-                -- Full plate
-                if nameplate.myPlate then
-                    ns:UpdateHealerIcon(nameplate.myPlate, unit)
-                end
-                -- Lite plate
-                if nameplate.liteContainer and nameplate.liteContainer:IsShown() then
-                    ns:UpdateLiteHealerIcon(nameplate.liteContainer, unit)
-                end
+    local mgr = C_NamePlateManager
+    if not (mgr and mgr.EnumerateActiveNamePlates) then return end
+    for nameplate in mgr.EnumerateActiveNamePlates() do
+        -- Full plate
+        local myPlate = nameplate.myPlate
+        if myPlate and myPlate.unit then
+            local unit = (ns.GetPlateRealToken and ns.GetPlateRealToken(myPlate.unit)) or myPlate.unit
+            if UnitGUID(unit) == guid then
+                ns:UpdateHealerIcon(myPlate, unit)
+            end
+        end
+        -- Lite plate
+        local container = nameplate.liteContainer
+        if container and container.unit and container:IsShown() then
+            local unit = (ns.GetPlateRealToken and ns.GetPlateRealToken(container.unit)) or container.unit
+            if UnitGUID(unit) == guid then
+                ns:UpdateLiteHealerIcon(container, unit)
             end
         end
     end

@@ -25,7 +25,13 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
   or mouse over are unchanged (still driven by the normal cast events), and the
   exact, no-bleed behaviour on awesome_wotlk is preserved.
 
-## [1.4.6] — 2026-06-24
+### Healer icons (PvP)
+- **Fixed the PvP healer icon not refreshing on stock 3.3.5a.** When a healer was
+  first detected mid-fight, the instant icon refresh looped over engine nameplate
+  unit tokens that don't exist on stock, so the icon only appeared on the next
+  plate update (health/aura change) instead of right away. The refresh now walks
+  the addon's active plates directly, so a newly-detected healer is marked
+  immediately on both stock and awesome_wotlk.
 
 Fixes auto/smart **tank mode** detection on stock 3.3.5a (WOTLK), based on a
 contributor PR from a tester (JulesPeace).
