@@ -6,18 +6,12 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 ## [1.4.6] — 2026-06-25
 
 ### Quest icons
-- **Fixed a false quest icon on a mob whose name is a suffix of the quest mob's
-  name.** With "Frenzied Pterrordax slain: 0/10" in the log, the plain mob
-  "Pterrordax" was shown with a quest objective icon, because the passive name
-  match searched for the plate name as a *substring* anywhere in the objective
-  line — and "Pterrordax" is a substring of "Frenzied Pterrordax". The icon
-  also never cleared on mouseover/target, since the tooltip scan (which
-  correctly found no objective) was overridden by the bad name match. The match
-  is now **anchored to the start** of the objective line, where the tracked
-  creature/item name always appears in every locale ("MobName slain: x/y",
-  "MobName getötet: x/y", "MobName：已击杀 x/y"), with a trailing word-boundary
-  check. A plate only matches when its name *is* the tracked name, not merely
-  the tail of a longer one.
+- **Fixed a quest icon showing on the wrong mob.** A mob could get a quest icon
+  even when you had no quest for it, as long as its name was part of a quest
+  mob's longer name. For example, with a quest for "Frenzied Pterrordax", a
+  plain "Pterrordax" wrongly showed the icon — and it stayed even when you
+  moused over or targeted it. TurboPlates now matches the full creature name, so
+  the icon only appears on the mob the quest is actually for.
 
 ## [1.4.6] — 2026-06-24
 
