@@ -1578,6 +1578,17 @@ if not HAVE_NATIVE_ENGINE then
             if cb and cb.IsShown and cb:IsShown() and cb.SetStatusBarTexture then
                 cb:SetStatusBarTexture(nil)
             end
+            -- Same for the Blizzard cast SPELL ICON (region 5). On awesome_wotlk the
+            -- engine DRIVES the nameplate cast bar and re-shows this icon C-side on every
+            -- cast, bypassing the one-time Show-hook that HideBlizzPlateRegions installed
+            -- (rule 8) - so it leaked as a stray icon at the un-offset mob-head position
+            -- (visible once the plate has an X/Y offset). Re-hide it every frame, like we
+            -- re-drop the bar texture; its texture stays readable via GetTexture for the
+            -- icon fallback below. No-op on stock (the engine never drives the cast bar
+            -- there, so the icon is never shown) and harmless to our own castbar.icon
+            -- (a separate frame in Castbars.lua).
+            local si = frame._tpSpellIcon
+            if si and si.IsShown and si:IsShown() and si.Hide then si:Hide() end
             local info
             if active and not frame._tpMatchedUnit then
                 local mp = frame.myPlate
