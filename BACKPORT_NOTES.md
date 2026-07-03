@@ -175,8 +175,27 @@ instead reads the exact `_realToken`, so twins are never confused.)
 spell **name**, **icon** and base **cast time** (`GetSpellInfo`'s 7th return, ms),
 keyed by GUID, then `ProcessPlateCasts` (every frame in the driver) renders a
 **self-animating** bar via the `ns:ScrapeCast*` API — no unit, no Blizzard bar
-needed. The real `SPELL_CAST_SUCCESS` / `FAILED` / `INTERRUPT` clears it (a 0.5s
-grace + a periodic sweep cap a missed end event).
+needed. The real `SPELL_CAST_SUCCESS` / `FAILED` clears it, `SPELL_INTERRUPT`
+clears the **destGUID** entry (the interrupted caster — srcGUID is the
+*interrupter*, an easy trap), `UNIT_DIED` drops a dead caster's bar, and a 0.5s
+grace + a periodic sweep cap a missed end event.
+
+**Channels** never fire `SPELL_CAST_START` — they log `SPELL_CAST_SUCCESS` at
+the moment channeling *begins*, and `GetSpellInfo` reports castTime 0 for them.
+`WotlkCompat_Channels.lua` supplies what CLEU can't: a registry of every player
+channeled spell across Classic/TBC/WotLK, keyed by **localized name** (via
+`GetSpellInfo(id)`), so all ranks and same-named NPC variants resolve on any
+locale. A `SPELL_CAST_SUCCESS` whose name is in the registry creates a
+`channel = true` entry that renders **draining** (1 → 0). Early ends are caught
+live via `SPELL_AURA_REMOVED` of the same-named aura the channel maintains (on
+the recorded victim — Drain Life, Mind Flay — or on the caster itself —
+Hellfire, Evocation), plus interrupt/death/timeout as above. Unknown channels
+**self-teach**: when the event path sees a real channel (`UnitChannelInfo` on a
+bound unit, at channel start only — pushback shortens a mid-channel read), the
+exact duration is learned per name and persisted in
+`TurboPlatesDB.learnedChannels`. Names that channeled in vanilla but are
+instant on a 3.3.5a client (Mend Pet, wand Shoot…) are deliberately excluded —
+an instant sharing a listed name would draw a phantom bar.
 
 **Which plates the mirror drives — "matched" ≠ "event-covered".** The normal
 `UNIT_SPELLCAST_*` event path only answers for `target` / `focus` / `player` /

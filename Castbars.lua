@@ -320,6 +320,18 @@ local function CastStart(castbar, unit)
         return
     end
     
+    -- Learn real channel durations from the event path: UnitChannelInfo gives
+    -- the exact span, which the combat-log mirror (untargeted mobs) can't derive
+    -- (channels report castTime 0). Feeds the name-keyed registry in
+    -- WotlkCompat_Channels.lua, persisted across sessions - an NPC channel seen
+    -- ONCE on a target then times correctly on every unbound plate. Only learn
+    -- at channel START: a mid-channel pickup (CheckExistingCast on bind) after
+    -- pushback reports a shortened span that would mistime future bars.
+    if not isCasting and ns.NoteChannelDuration
+       and (GetTime() - startTime) < 0.5 then
+        ns.NoteChannelDuration(name, endTime - startTime)
+    end
+
     castbar.max = endTime - startTime
     castbar.startTime = startTime
     castbar.casting = isCasting or nil

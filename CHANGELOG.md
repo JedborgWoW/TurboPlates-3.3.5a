@@ -6,6 +6,24 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 ## [1.4.6] — 2026-07-03
 
 ### Castbars
+- **Channeled spells now show a cast bar on untargeted mobs (both stock 3.3.5a
+  and awesome_wotlk).** Mobs channeling Drain Life, Arcane Missiles, Mind Flay,
+  Blizzard, Hellfire and the like previously showed nothing unless you targeted
+  them — the combat log has no "cast start" event for channels, so the
+  untargeted-cast mirror never saw them. TurboPlates now ships a registry of
+  every player channeled spell across Classic, TBC and WotLK (matched by name,
+  so all ranks and the NPC variants sharing those names are covered on any
+  locale), shows a draining bar with the spell's name and icon, and clears it
+  the moment the channel ends, breaks early, is interrupted, or the caster
+  dies. Channels not in the registry **teach themselves**: the first time
+  anyone targets a mob channeling an unknown spell, its exact duration is
+  learned and saved permanently, so encounter-specific channels work from then
+  on.
+- **Fixed an interrupted cast on an untargeted mob filling to completion.** The
+  combat log names the *interrupter* first and the interrupted *caster* second;
+  the mirror cleared the wrong side, so kicking a mob's cast left its bar
+  running to the end instead of vanishing. (A dying caster's bar is also
+  removed immediately now.)
 - **Fixed no cast bar appearing on the mob your cursor is resting on (both stock
   3.3.5a and awesome_wotlk).** While the mouse hovered a mob, a cast it *started*
   during the hover never showed a bar — the game sends no cast events for the

@@ -1506,7 +1506,9 @@ if not HAVE_NATIVE_ENGINE then
     -- caster's GUID -- pinned (stock) or a real nameplateN token (awesome_wotlk).
     -- The former by-name index was removed: it bled an off-screen same-named
     -- caster's cast onto a visible non-caster (see ProcessPlateCasts stock branch).
-    -- entry = { name, icon, start, duration, guid }
+    -- entry = { name, icon, start, duration, guid[, channel, victim] }
+    -- channel=true entries come from SPELL_CAST_SUCCESS + the channeled-spell
+    -- registry (WotlkCompat_Channels.lua) and render DRAINING (1 -> 0).
     local castByGUID = {}      -- [caster GUID] = entry
     local lastCastSweep = 0    -- throttle for the stale-entry sweep below
     local CAST_GRACE = 0.5     -- keep the bar this long past the estimated cast time
@@ -1696,6 +1698,9 @@ if not HAVE_NATIVE_ENGINE then
                     end
                 end
                 local fill = (now - info.start) / info.duration
+                -- Channels drain from full to empty, like the event path's
+                -- channeling branch (CastbarOnUpdate decrements for channels).
+                if info.channel then fill = 1 - fill end
                 if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
                 if not frame._tpScraping then
                     frame._tpScraping = true
@@ -1847,11 +1852,57 @@ if not HAVE_NATIVE_ENGINE then
                                 start = now, duration = dur, guid = srcGUID }
                 castByGUID[srcGUID] = entry
             end
-        elseif subevent == "SPELL_CAST_SUCCESS" or subevent == "SPELL_CAST_FAILED"
-               or subevent == "SPELL_INTERRUPT" then
-            -- End of cast. Clear by GUID, and the name entry only if it's the SAME
-            -- cast (don't wipe a newer same-named caster's entry).
+        elseif subevent == "SPELL_CAST_SUCCESS" and srcGUID then
+            -- For a CHANNELED spell this is the START marker: channels never fire
+            -- SPELL_CAST_START, they log SPELL_CAST_SUCCESS the moment channeling
+            -- begins, and GetSpellInfo reports castTime 0 for them - so the
+            -- duration comes from the seed/learned registry instead
+            -- (WotlkCompat_Channels.lua, name-keyed so NPC variants that share a
+            -- player spell's name resolve too). For a normal cast this is the END.
+            local chDur = spellName and ns.GetChannelDuration
+                          and ns.GetChannelDuration(spellName)
+            if chDur then
+                local giName, _, giIcon = GetSpellInfo(spellId)
+                -- victim = the channel's target; its aura removal (below) is the
+                -- live "channel stopped early" signal. Normalize the no-target
+                -- GUID so AoE self-channels match their own aura instead.
+                local victim = destGUID
+                if victim == "" or victim == "0x0000000000000000" then victim = nil end
+                castByGUID[srcGUID] = { name = giName or spellName, icon = giIcon,
+                                        start = GetTime(), duration = chDur,
+                                        guid = srcGUID, channel = true,
+                                        victim = victim }
+            else
+                ClearCastEntry(castByGUID[srcGUID])
+            end
+        elseif subevent == "SPELL_CAST_FAILED" then
             if srcGUID then ClearCastEntry(castByGUID[srcGUID]) end
+        elseif subevent == "SPELL_INTERRUPT" then
+            -- The INTERRUPTED caster is destGUID - srcGUID is the INTERRUPTER
+            -- (Kick/Counterspell source). The old clear-by-srcGUID removed a
+            -- nonexistent entry, so an interrupted unbound mob's bar kept
+            -- filling until the grace sweep instead of vanishing on the kick.
+            if destGUID then ClearCastEntry(castByGUID[destGUID]) end
+        elseif subevent == "SPELL_AURA_REMOVED" then
+            -- Early channel end (caster stunned/moved, victim died/LoS'd): most
+            -- channels maintain an aura with the SAME name - on the victim
+            -- (Drain Life, Mind Flay, Mind Control) or on the caster itself
+            -- (Hellfire, Evocation, Eyes of the Beast) - and its removal is the
+            -- only live "channel stopped" signal CLEU gives. Guard on the
+            -- recorded victim so this caster's OLD copy of the aura expiring on
+            -- another unit can't kill a live bar, and skip the first 0.3s to
+            -- survive apply/remove reordering at channel start. Pure-AoE
+            -- channels with no aura (Blizzard) rely on the duration timeout /
+            -- interrupt / death like before.
+            local e = srcGUID and castByGUID[srcGUID]
+            if e and e.channel and spellName == e.name
+               and (not e.victim or e.victim == destGUID)
+               and (GetTime() - e.start) > 0.3 then
+                ClearCastEntry(e)
+            end
+        elseif subevent == "UNIT_DIED" then
+            -- Dead caster: drop its bar now instead of waiting for the sweep.
+            if destGUID then ClearCastEntry(castByGUID[destGUID]) end
         end
     end)
 

@@ -9,6 +9,7 @@
 # Order matters: pure-API shims first (EventRegistry/C_Timer/etc.), then the
 # name-based nameplate engine, then the unit/aura API mappings.
 WotlkCompat_API.lua
+WotlkCompat_Channels.lua
 WotlkCompat.lua
 WotlkCompat_Auras.lua
 
