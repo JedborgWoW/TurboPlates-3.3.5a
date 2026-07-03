@@ -3,7 +3,7 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
-## [1.4.6] — 2026-07-03
+## [1.4.5] — 2026-07-03
 
 ### Castbars
 - **Channeled spells now show a cast bar on untargeted mobs (both stock 3.3.5a
@@ -57,7 +57,7 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
   would have thrown "attempt to call global 'IsNamePlate' (a nil value)" on that
   rarely-taken path.
 
-## [1.4.6] — 2026-06-25
+## [1.4.5] — 2026-06-25
 
 ### Quest icons
 - **Fixed a quest icon showing on the wrong mob.** A mob could get a quest icon
@@ -143,7 +143,7 @@ contributor PR from a tester (JulesPeace).
 - Added **`/tp version`** (alias `/tp ver`) to print the installed version in
   chat on demand.
 
-## [1.4.5-335] — 2026-06-24
+## [1.4.5] — 2026-06-24
 
 A large stabilization pass focused on private-server (3.3.5a) behavior, the
 optional **awesome_wotlk** client patch, same-named mob handling, castbars,
@@ -208,4 +208,4 @@ quest icons, and the options UI.
 - Fixed dropdown option labels drawing behind the list background.
 - Health % text now rounds up (ceil) to match the player's unit-frame rounding.
 
-[1.4.5-335]: https://github.com/JedborgWoW/TurboPlates-3.3.5a
+[1.4.5]: https://github.com/JedborgWoW/TurboPlates-3.3.5a
