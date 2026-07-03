@@ -33,8 +33,13 @@ function ns.PlayerHasAggroFrom(myPlate, unit)
     local now = GetTime()
     -- PRIMARY: pinned GUID (exact mob) - authoritative, no name fallback, so a
     -- same-named neighbour's aggro can't bleed onto a mob that ISN'T attacking you.
+    -- Validate the pin like the debuff/cast paths (ns.IsPinnedGUIDStale): a stale
+    -- pin from a transient wrong bind to a same-named twin would otherwise paint
+    -- the twin your aggro colour while the REAL mob hits you. A stale pin falls
+    -- through to the unique-name fallback below (ambiguous -> no colour).
     local pg = myPlate and myPlate.pinnedGUID
-    if pg and myPlate.pinnedName == name then
+    if pg and myPlate.pinnedName == name
+       and not (ns.IsPinnedGUIDStale and ns.IsPinnedGUIDStale(pg, unit)) then
         local e = aggroByGUID[pg]
         return e ~= nil and (now - e.t) <= AGGRO_TTL
     end

@@ -3,6 +3,42 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
+## [1.4.6] — 2026-07-03
+
+### Castbars
+- **Fixed no cast bar appearing on the mob your cursor is resting on (both stock
+  3.3.5a and awesome_wotlk).** While the mouse hovered a mob, a cast it *started*
+  during the hover never showed a bar — the game sends no cast events for the
+  "mouseover" unit (that plate was wrongly treated as event-covered, the same
+  dead zone as the party/raid-target fix from 2026-06-25). Hovered mobs now get
+  their cast from the combat log by the mob's exact GUID, like party/raid
+  targets.
+- **Fixed an interrupted cast filling to completion on a hovered mob.** A cast
+  already in progress when you moused over a mob was picked up correctly, but
+  its end/interrupt events never arrived for the hovered unit, so the bar kept
+  filling as if the cast finished. The combat-log path now tears the bar down
+  the moment the cast ends or is interrupted.
+- **Fixed a cast bar showing on the wrong same-named mob (stock 3.3.5a).** The
+  cast display trusted a plate's remembered mob identity ("pin") by name alone.
+  After targeting one of several identical full-health mobs, a neighbour could
+  briefly keep a stale pin to the caster and draw its cast bar. The cast path
+  now validates the pin exactly like the debuff-icon fix from 2026-06-24 (level
+  must match, and the pin is rejected if another plate now owns that mob) — so
+  the bar can no longer appear on a twin. awesome_wotlk resolves plates exactly
+  and is unaffected.
+
+### Threat/aggro colour
+- **Fixed the aggro colour appearing on the wrong same-named mob (stock
+  3.3.5a).** Same stale-pin root as above: a twin plate with a leftover pin to
+  the mob that's hitting you could turn your aggro colour. The pin is now
+  validated before use; an ambiguous twin shows the normal hostile colour.
+
+### Under the hood
+- **Fixed a latent error when a hidden nameplate was re-shown by the game via
+  the Lua path.** An internal helper was referenced before it was defined, which
+  would have thrown "attempt to call global 'IsNamePlate' (a nil value)" on that
+  rarely-taken path.
+
 ## [1.4.6] — 2026-06-25
 
 ### Quest icons

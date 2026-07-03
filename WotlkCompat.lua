@@ -1341,6 +1341,13 @@ if not HAVE_NATIVE_ENGINE then
         blizzFrame._turboBlizzHidden = true
     end
 
+    -- Forward declaration: AcquirePlate's Show hook (below) captures this name.
+    -- Without it the closure compiled a GLOBAL lookup (the local didn't exist yet
+    -- at that point in the file), so the hook threw "attempt to call global
+    -- 'IsNamePlate' (a nil value)" whenever a released plate was re-shown via a
+    -- Lua-side Show() instead of the usual C-side path.
+    local IsNamePlate
+
     local function FireAdded(token, blizzFrame)
         if EventRegistry and EventRegistry.TriggerEvent then
             EventRegistry:TriggerEvent("NamePlateManager.UnitAdded", token, blizzFrame)
@@ -1467,7 +1474,7 @@ if not HAVE_NATIVE_ENGINE then
         -- IsShown() / managedPlates elsewhere, so a kept-but-hidden token is inert.
     end
 
-    local function IsNamePlate(frame)
+    function IsNamePlate(frame)  -- assigns the forward-declared local above
         if managedPlates[frame] then return true end
         -- Once a pooled WorldFrame child has been confirmed as a nameplate it
         -- stays one for the session (the client recycles the same frames). We must
@@ -1592,29 +1599,38 @@ if not HAVE_NATIVE_ENGINE then
             local info
             -- The match tracker binds plates to target/focus/mouseover AND to every
             -- party/raid member's target (partyNtarget/raidNtarget, see trackedUnits).
-            -- The event-driven castbar path (UNIT_SPELLCAST_*) only fires for the first
-            -- group, so a plate bound to a partyNtarget/raidNtarget pseudo-unit used to
-            -- get a castbar from NEITHER path: this CLEU mirror skipped every matched
-            -- plate, yet no UNIT_SPELLCAST event ever fires for those units ("no cast on
-            -- a mob I don't target/mouseover", worst in dungeons/raids where every mob is
-            -- some party member's target; awesome_wotlk's exact-GUID bind (ac9a2f6) made
-            -- it obvious by binding those plates reliably). Drive the mirror for matched
-            -- plates too, EXCEPT the ones the event path owns (target/focus/mouseover) -
-            -- driving those here would fight the event path over the same bar.
+            -- The event-driven castbar path (UNIT_SPELLCAST_*) only fires for units the
+            -- client tracks as EVENT units - and on 3.3.5a that is target/focus/player/
+            -- pet/party/raid, NOT "mouseover" and NOT partyNtarget/raidNtarget (this is
+            -- why Quartz's Mouseover module POLLS UnitCastingInfo instead of using
+            -- events). So a plate bound to any of those non-event units used to get a
+            -- castbar from NEITHER path: this CLEU mirror skipped every matched plate,
+            -- yet no UNIT_SPELLCAST event ever fires for them. First seen for
+            -- partyNtarget ("no cast on a mob I don't target/mouseover", worst in
+            -- dungeons/raids); the SAME dead zone applied to a plate bound to
+            -- "mouseover" - a cast STARTED while the cursor stayed on the mob never
+            -- showed, and an in-progress cast picked up at bind (CheckExistingCast)
+            -- never saw its end events, so an interrupted cast filled to completion.
+            -- Drive the mirror for all matched plates EXCEPT the ones the event path
+            -- truly owns (target/focus) - driving those here would fight the event
+            -- path over the same bar. The mirror resolves by UnitGUID(matchedUnit)
+            -- below (exact on awesome_wotlk, as-exact-as-the-bind on stock) and the
+            -- CLEU end events clear it, so interrupts tear the bar down correctly.
             local mu = frame._tpMatchedUnit
-            local eventOwnsCast = (mu == "target" or mu == "focus" or mu == "mouseover")
+            local eventOwnsCast = (mu == "target" or mu == "focus")
             if active and not eventOwnsCast then
                 local mp = frame.myPlate
                 local pname = PlateName(frame)
                 local rt = frame._realToken
                 if mu then
-                    -- Matched to a partyNtarget/raidNtarget REAL unit: resolve the cast
-                    -- by that mob's exact GUID. Base WoW (UnitGUID + CLEU castByGUID), no
-                    -- DLL needed, so it works on stock AND awesome_wotlk - exact on
-                    -- awesome_wotlk (the bind is GUID-exact), and as-exact-as-the-bind on
-                    -- stock, matching how debuffs/auras already read UnitAura(matchedUnit)
-                    -- on a bound plate. Fixes "castbar doesn't show on a mob I haven't
-                    -- targeted/moused-over" in groups.
+                    -- Matched to a mouseover/partyNtarget/raidNtarget REAL unit: resolve
+                    -- the cast by that mob's exact GUID. Base WoW (UnitGUID + CLEU
+                    -- castByGUID), no DLL needed, so it works on stock AND awesome_wotlk -
+                    -- exact on awesome_wotlk (the bind is GUID-exact), and as-exact-as-the-
+                    -- bind on stock, matching how debuffs/auras already read
+                    -- UnitAura(matchedUnit) on a bound plate. Fixes "castbar doesn't show
+                    -- on a mob I haven't targeted" in groups AND on a mob the cursor is
+                    -- resting on (no UNIT_SPELLCAST event ever fires for "mouseover").
                     local g = _UnitGUID(mu)
                     info = g and castByGUID[g] or nil
                 elseif rt and _UnitExists(rt) then
@@ -1643,7 +1659,20 @@ if not HAVE_NATIVE_ENGINE then
                     -- the branch above and is unaffected by this.)
                     local pg = mp and mp.pinnedGUID
                     if pg and castByGUID[pg] and mp.pinnedName == pname then
-                        info = castByGUID[pg]
+                        -- Validate the pin like the debuff path (PinSignatureValid in
+                        -- Auras.lua, commit 4eca096): a plate can keep a pin from a
+                        -- transient WRONG bind to a same-named twin's unit (both full
+                        -- HP -> the engine pins a twin, the correction moves the bind
+                        -- but the pin persists by design). Without this the twin drew
+                        -- the caster's bar via its stale pin - the cast-side sibling
+                        -- of the Polymorph icon bleed. Same level check, and reject a
+                        -- pin whose GUID another plate now claims (bound elsewhere by
+                        -- exact HP, or also pinned -> ambiguous, both suppress).
+                        local pl, cl = mp.pinnedLevel, PlateLevel(frame)
+                        local levelOK = not (pl and pl > 0 and cl and cl > 0 and cl ~= pl)
+                        if levelOK and not ns.IsPinnedGUIDStale(pg, token) then
+                            info = castByGUID[pg]
+                        end
                     end
                 end
                 -- Past the estimated cast time with no end event: treat as stale and

@@ -179,20 +179,24 @@ needed. The real `SPELL_CAST_SUCCESS` / `FAILED` / `INTERRUPT` clears it (a 0.5s
 grace + a periodic sweep cap a missed end event).
 
 **Which plates the mirror drives — "matched" ≠ "event-covered".** The normal
-`UNIT_SPELLCAST_*` event path only answers for `target` / `focus` / `mouseover` /
-`player` / `pet` / party-and-raid **members** — **never their targets.** But the
-match tracker also binds each `partyNtarget` / `raidNtarget` (the mob a group
-member is fighting). An older gate excluded *all* matched plates from the mirror,
-so a plate bound to a party/raid member's target got a cast bar from **neither**
-path — a dead zone, worst in dungeons/raids where every mob is some member's
-target. The resolution ladder is now:
+`UNIT_SPELLCAST_*` event path only answers for `target` / `focus` / `player` /
+`pet` / party-and-raid **members** — **never `mouseover`** (this is why Quartz's
+Mouseover module polls `UnitCastingInfo` instead of using events) **and never
+their targets.** But the match tracker also binds `mouseover` and each
+`partyNtarget` / `raidNtarget` (the mob a group member is fighting). An older
+gate excluded *all* matched plates from the mirror, so a plate bound to any of
+those non-event units got a cast bar from **neither** path — a dead zone, worst
+in dungeons/raids where every mob is some member's target, and equally on a mob
+the cursor rested on (a cast *started* mid-hover never showed; an in-progress
+cast picked up at bind never saw its end events, so an interrupt filled to
+completion). The resolution ladder is now:
 
 | Plate | Cast source |
 |---|---|
-| matched → `target` / `focus` / `mouseover` | event path (`UNIT_SPELLCAST_*`) |
-| matched → `partyN` / `raidNtarget` | `castByGUID[UnitGUID(matchedUnit)]` — exact |
+| matched → `target` / `focus` | event path (`UNIT_SPELLCAST_*`) |
+| matched → `mouseover` / `partyN` / `raidNtarget` | `castByGUID[UnitGUID(matchedUnit)]` — exact |
 | unmatched, **awesome_wotlk** | `castByGUID[UnitGUID(_realToken)]` — exact |
-| unmatched, **stock** | **pinned GUID only** (nothing if never pinned) |
+| unmatched, **stock** | **pinned GUID only**, validated like the debuff pin (level match + `IsPinnedGUIDStale`); nothing if never pinned |
 
 There is **no name-union** "show on all same-named" path (it bled onto every twin)
 and, for casts, **no unique-name fallback** either: a stock mob you've never
