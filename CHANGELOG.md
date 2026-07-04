@@ -3,6 +3,25 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
+## [1.4.5] — 2026-07-04
+
+### Nameplates (awesome_wotlk)
+- **Fixed nameplates randomly not showing, especially after `/reload`.** On the
+  awesome_wotlk client the DLL controls nameplate visibility itself, and
+  TurboPlates' plate discovery (a stock-3.3.5a scan that recognises plates by
+  their texture and shown state) could race with that: after a reload an
+  already-visible plate was missed and never re-checked, so it stayed invisible
+  until you toggled nameplates off and on to force it back. TurboPlates now
+  listens to the DLL's own nameplate events (`NAME_PLATE_CREATED` /
+  `NAME_PLATE_UNIT_ADDED`) and picks a plate up the instant the client says it's
+  there, instead of waiting for the scan to notice — so plates appear reliably
+  on login, on `/reload`, and when panning the camera. Stock 3.3.5a is
+  unaffected (it has no such events and keeps using the scan).
+- **WeakAuras anchored to nameplates settle faster (awesome_wotlk).** Because a
+  plate is now finalised in the same instant the client announces it, a
+  WeakAura anchored to that plate sees its final size/position immediately
+  instead of lagging or repositioning a fraction of a second later.
+
 ## [1.4.5] — 2026-07-03
 
 ### Castbars
