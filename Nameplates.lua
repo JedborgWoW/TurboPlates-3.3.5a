@@ -2406,6 +2406,12 @@ end
 local function UpdateTargetGlow(myPlate, isTarget)
     -- Skip target glow on personal plate (player doesn't need target indicator on themselves)
     if myPlate.isPlayer then return end
+    -- Bail on a half-built plate: the thick/thin outline parents to myPlate.hp and
+    -- reads its frame level, so a nil health bar throws "attempt to index field
+    -- 'hp'". hp is a constructor field and is normally always present; it can be
+    -- missing only if plate setup was aborted partway (e.g. an earlier error), so
+    -- there's nothing to glow yet. A later update re-runs this once the plate is whole.
+    if not myPlate.hp then return end
 
     local glowStyle = ns.c_targetGlow
     local arrowStyle = ns.c_targetArrow

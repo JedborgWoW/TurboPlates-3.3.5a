@@ -294,29 +294,48 @@ end
 
 ---------------------------------------------------------------------------
 -- C_CVar (Set / Get / GetBool / GetNumber)
+-- Define each method only if it's missing. Gating the whole block on
+-- "C_CVar exists" broke on awesome_wotlk (and any core/addon that ships a
+-- PARTIAL or retail-style C_CVar, e.g. only GetCVar/SetCVar): the table was
+-- present so our shim was skipped entirely, leaving Get/GetNumber/GetBool/Set
+-- nil -> "attempt to call field 'GetNumber' (a nil value)" crashed
+-- ResolveNameplateAlpha on every camera move. Same partial-native-API trap as
+-- C_NamePlate. Each method is self-contained (uses the captured global CVar
+-- API directly, not a sibling C_CVar method that might be foreign/native).
 ---------------------------------------------------------------------------
-if type(C_CVar) ~= "table" then
-    local GetCVar, SetCVar, GetCVarBool = GetCVar, SetCVar, GetCVarBool
-    C_CVar = {}
-    function C_CVar.Set(name, value)
-        if type(value) == "boolean" then value = value and "1" or "0" end
-        pcall(SetCVar, name, value)   -- unknown CVars error; guard
-    end
-    function C_CVar.Get(name)
-        local ok, v = pcall(GetCVar, name)
+do
+    local _GetCVar, _SetCVar, _GetCVarBool = GetCVar, SetCVar, GetCVarBool
+    if type(C_CVar) ~= "table" then C_CVar = {} end
+    local function readCVar(name)
+        local ok, v = pcall(_GetCVar, name)
         return ok and v or nil
     end
-    function C_CVar.GetBool(name)
-        if GetCVarBool then
-            local ok, v = pcall(GetCVarBool, name)
-            if ok then return v and true or false end
+    if type(C_CVar.Set) ~= "function" then
+        function C_CVar.Set(name, value)
+            if type(value) == "boolean" then value = value and "1" or "0" end
+            pcall(_SetCVar, name, value)   -- unknown CVars error; guard
         end
-        local v = C_CVar.Get(name)
-        return v == "1" or v == "true"
     end
-    function C_CVar.GetNumber(name)
-        local v = C_CVar.Get(name)
-        return v and tonumber(v) or nil
+    if type(C_CVar.Get) ~= "function" then
+        function C_CVar.Get(name)
+            return readCVar(name)
+        end
+    end
+    if type(C_CVar.GetBool) ~= "function" then
+        function C_CVar.GetBool(name)
+            if _GetCVarBool then
+                local ok, v = pcall(_GetCVarBool, name)
+                if ok then return v and true or false end
+            end
+            local v = readCVar(name)
+            return v == "1" or v == "true"
+        end
+    end
+    if type(C_CVar.GetNumber) ~= "function" then
+        function C_CVar.GetNumber(name)
+            local v = readCVar(name)
+            return v and tonumber(v) or nil
+        end
     end
     _G.C_CVar = C_CVar
 end

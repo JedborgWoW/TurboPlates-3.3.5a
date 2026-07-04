@@ -5,6 +5,21 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
 ## [1.4.5] — 2026-07-04
 
+### Errors (awesome_wotlk)
+- **Fixed a flood of Lua errors on the awesome_wotlk client** — `attempt to call
+  field 'GetNumber'/'GetBool'/'Set' (a nil value)` from `Core.lua`,
+  `Stacking.lua` and elsewhere, firing repeatedly (most visibly on every camera
+  move). The client ships its own partial `C_CVar`, so TurboPlates' compat shim —
+  which only filled `C_CVar` in when the whole table was absent — was skipped
+  entirely, leaving its `Get`/`GetNumber`/`GetBool`/`Set` helpers undefined. The
+  shim now adds each helper individually when missing, so it completes a partial
+  `C_CVar` instead of giving up on it (the same fix already applied to
+  `C_NamePlate`). Stock 3.3.5a was never affected.
+- **Fixed a follow-on `attempt to index field 'hp'` error on the target glow.**
+  When the errors above aborted a plate's setup partway, the target-glow/outline
+  code could run against a half-built plate with no health bar and throw. It now
+  bails cleanly on an unfinished plate and re-runs once the plate is whole.
+
 ### Nameplates (awesome_wotlk)
 - **Fixed nameplates randomly not showing, especially after `/reload`.** On the
   awesome_wotlk client the DLL controls nameplate visibility itself, and
