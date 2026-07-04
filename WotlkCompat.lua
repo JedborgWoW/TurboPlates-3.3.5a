@@ -2056,24 +2056,56 @@ if not HAVE_NATIVE_ENGINE then
     function C_NamePlateManager.SetEnableResizeNamePlates() end
     _G.C_NamePlateManager = C_NamePlateManager
 
-    -- awesome_wotlk WeakAura sync ------------------------------------------
-    -- The DLL fires NAME_PLATE_UNIT_ADDED immediately when a plate appears.
-    -- WeakAuras anchored to the nameplate run their handler next in the SAME
-    -- event dispatch cycle. TurboPlates normally announces a plate ~0.1-0.5s
-    -- later (waiting for PlateAnnounceReady: name scraped + reaction stable).
-    -- When FireAdded fires late, FullPlateUpdate rescales the nameplate AFTER
-    -- the WeakAura has already anchored, so the WeakAura repositions. Fix:
-    -- register for NAME_PLATE_UNIT_ADDED first (TurboPlates loads before WAs),
-    -- pre-fill name + reaction from the native API so PlateAnnounceReady
-    -- passes immediately, and fire FireAdded right now. By the time the WA's
-    -- handler runs for the same event, FullPlateUpdate is already done and the
-    -- plate is in its final scaled state.
+    -- awesome_wotlk native-event plate discovery + WeakAura sync -----------
+    -- On awesome_wotlk the DLL manages nameplate VISIBILITY C-side and exposes
+    -- authoritative native events. Our stock-3.3.5a discovery (WorldFrame scan +
+    -- texture fingerprint + IsShown) races with that C-side state: after a /reload
+    -- the DLL's visibility flags are briefly stale, so an already-visible plate is
+    -- missed by the heuristic and never re-evaluated (no WorldFrame child-count
+    -- change, no Show hook fires), leaving it invisible until the player toggles
+    -- nameplates - which forces both a DLL visibility re-sync AND our CVAR_UPDATE
+    -- rescan. Symptom the testers hit: "nameplate randomly not showing, especially
+    -- after /reload; deactivate/activate nameplates to see them again".
+    --
+    -- The DLL's nameplate IS the client's own anonymous WorldFrame-child frame
+    -- (unit->nameplate) - the exact frame we scrape - so we can drive discovery
+    -- straight from the native events instead of the fingerprint heuristic:
+    --   NAME_PLATE_CREATED     -> remember the frame as a known plate (authoritative
+    --                             identity; no fingerprint match needed).
+    --   NAME_PLATE_UNIT_ADDED  -> the plate is visible NOW: acquire it immediately
+    --                             if the scan hasn't yet (closes the post-reload
+    --                             gap), pre-fill name + reaction from the native unit
+    --                             API so PlateAnnounceReady passes at once, and
+    --                             announce in THIS event cycle. TurboPlates loads
+    --                             before WeakAuras, so a WA anchored to the plate
+    --                             (which runs right after us) sees the final scaled
+    --                             plate - no reposition, no lag.
+    -- Release still flows through ProcessPlateVisibility (IsShown) as before.
     if HAVE_AWESOME_WOTLK and _nativeGetNamePlateForUnit then
+        local function aweMarkKnown(blizzFrame)
+            if not blizzFrame then return end
+            blizzFrame._tpIsNamePlate = true
+            knownPlates[blizzFrame] = true
+        end
         local aweSyncFrame = CreateFrame("Frame")
+        aweSyncFrame:RegisterEvent("NAME_PLATE_CREATED")
         aweSyncFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
-        aweSyncFrame:SetScript("OnEvent", function(_, _, unit)
+        aweSyncFrame:SetScript("OnEvent", function(_, event, arg1)
+            if event == "NAME_PLATE_CREATED" then
+                -- arg1 is the namePlateBase frame itself.
+                aweMarkKnown(arg1)
+                return
+            end
+            -- NAME_PLATE_UNIT_ADDED: arg1 is a native unit token ("nameplate1").
+            local unit = arg1
             local blizzFrame = _nativeGetNamePlateForUnit(unit)
-            if not blizzFrame or not managedPlates[blizzFrame] then return end
+            if not blizzFrame then return end
+            aweMarkKnown(blizzFrame)
+            -- Acquire now if the fingerprint scan hasn't - this is the authoritative
+            -- "plate is up" signal and closes the post-reload discovery gap.
+            if not managedPlates[blizzFrame] then
+                AcquirePlate(blizzFrame)
+            end
             if blizzFrame._tpAnnounced then return end
             -- Pre-fill name from native API, bypassing the font-region scrape wait.
             local name = _UnitName(unit)
@@ -2093,7 +2125,7 @@ if not HAVE_NATIVE_ENGINE then
             end
         end)
     end
-    -- end awesome_wotlk WeakAura sync --------------------------------------
+    -- end awesome_wotlk native-event discovery -----------------------------
 
     function ns.GetResolvedNameplateUnit(blizzFrame)
         return blizzFrame and blizzFrame._unit or nil
