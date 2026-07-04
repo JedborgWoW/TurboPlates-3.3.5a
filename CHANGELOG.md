@@ -5,6 +5,22 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
 ## [1.4.5] — 2026-07-04
 
+### Compat (metatable shims)
+- **Hardened the WotLK compat shims that add methods to Blizzard widget
+  metatables so they can no longer be silently dropped.** On this client the
+  Frame-type method table carries a `__newindex` guard that silently swallows a
+  plain assignment for a *new* method — the method never gets installed and every
+  call to it hits `nil`. The affected shims now install with `rawset`, which
+  bypasses that guard: `Frame:SetSize` and `GameTooltip:SetSpellByID` (both new
+  keys), plus `Texture:SetColorTexture`, `Texture:SetAtlas`,
+  `Region:GetEffectiveScale` and the `GameTooltip:SetHyperlink` guard for
+  uniformity. The bug was latent — the two frame-type shims only run when the
+  method is genuinely absent (a stock 3.3.5a client without ClassicAPI /
+  awesome_wotlk), where `SetSize` backs dozens of call sites and `SetSpellByID`
+  backs the options spell tooltips, so a plain assignment would have left them
+  nil and crashed. Clients that already provide these natively (awesome_wotlk /
+  ClassicAPI) were never affected.
+
 ### Errors (awesome_wotlk)
 - **Fixed a flood of Lua errors on the awesome_wotlk client** — `attempt to call
   field 'GetNumber'/'GetBool'/'Set' (a nil value)` from `Core.lua`,

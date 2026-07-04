@@ -231,11 +231,16 @@ end
 do
     local probe = CreateFrame("Frame")
     if type(probe.SetSize) ~= "function" then
+        -- rawset, not `meta.SetSize = fn`: on this client the Frame-type __index
+        -- table carries a __newindex guard, so a plain assignment for a NEW key is
+        -- silently swallowed -> SetSize would stay nil and crash every :SetSize
+        -- call site. rawset bypasses the guard. (The probe check above already
+        -- proves SetSize isn't native, so we're not shadowing anything.)
         local meta = getmetatable(probe).__index
-        function meta:SetSize(w, h)
+        rawset(meta, "SetSize", function(self, w, h)
             if w then self:SetWidth(w) end
             if h then self:SetHeight(h) end
-        end
+        end)
     end
 end
 
@@ -244,9 +249,9 @@ do
     local probeTex = UIParent:CreateTexture()
     if type(probeTex.SetColorTexture) ~= "function" then
         local texMeta = getmetatable(probeTex).__index
-        function texMeta:SetColorTexture(r, g, b, a)
+        rawset(texMeta, "SetColorTexture", function(self, r, g, b, a)
             self:SetTexture(r, g, b, a or 1)
-        end
+        end)
     end
 end
 
@@ -272,7 +277,7 @@ do
         ["warfront-hordehero"]    = SKULL,
         ["islands-azeriteboss"]   = SKULL,
     }
-    function texMeta:SetAtlas(atlas, ...)
+    rawset(texMeta, "SetAtlas", function(self, atlas, ...)
         -- Prefer OUR verified 3.3.5a texture when we have one mapped. ClassicAPI's
         -- SetAtlas can "succeed" (pcall ok) yet render BLANK for some retail atlases --
         -- the yellow checkmark did exactly this, so every /tp checkbox showed no tick
@@ -289,7 +294,7 @@ do
             if ok then return end
         end
         self:SetTexture(nil)
-    end
+    end)
 end
 
 ---------------------------------------------------------------------------
@@ -394,13 +399,13 @@ do
     local function addFallback(probe)
         if type(probe.GetEffectiveScale) == "function" then return end
         local meta = getmetatable(probe).__index
-        function meta:GetEffectiveScale()
+        rawset(meta, "GetEffectiveScale", function(self)
             local parent = self:GetParent()
             if parent and parent.GetEffectiveScale then
                 return parent:GetEffectiveScale()
             end
             return 1
-        end
+        end)
     end
     addFallback(UIParent:CreateTexture())
     addFallback(UIParent:CreateFontString())
@@ -486,7 +491,11 @@ do
     if type(index) == "table" then
         local rawSetHyperlink = index.SetHyperlink
         if type(rawSetHyperlink) == "function" then
-            function index:SetHyperlink(link, ...)
+            -- rawset: the GameTooltip __index table may carry the same __newindex
+            -- guard as Frame-type metatables on this client. SetHyperlink already
+            -- exists so a plain assignment would stick, but rawset is uniform and
+            -- immune to the guard regardless.
+            rawset(index, "SetHyperlink", function(self, link, ...)
                 if type(link) == "string" then
                     local id = link:match("^spell:(%d+)")
                     if id and not GetSpellInfo(tonumber(id)) then
@@ -494,13 +503,17 @@ do
                     end
                 end
                 return rawSetHyperlink(self, link, ...)
-            end
+            end)
         end
         -- Define/override with a validated implementation. Always check
         -- GetSpellInfo first; never hand SetHyperlink an unknown spell id.
-        function index:SetSpellByID(spellId)
+        -- rawset (not `index.SetSpellByID = fn`): SetSpellByID does NOT exist on
+        -- 3.3.5a, so this is a NEW key -> a plain assignment would be silently
+        -- swallowed by the __newindex guard and the method would stay nil,
+        -- erroring at GameTooltip:SetSpellByID() call sites (e.g. OptionsGUI).
+        rawset(index, "SetSpellByID", function(self, spellId)
             if not spellId or not GetSpellInfo(spellId) then return end
             return self:SetHyperlink("spell:"..spellId)
-        end
+        end)
     end
 end
