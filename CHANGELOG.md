@@ -5,6 +5,22 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
 ## [Unreleased]
 
+### Class colors (automatic, no click needed)
+- **Player nameplates now class-color automatically instead of only after you
+  target/mouseover them.** Root cause was structural: the compat `UnitClass`
+  resolved class ONLY from the name-keyed cache (filled by clicking, hovering,
+  or a group member targeting the player) or a bound unit — so an untouched
+  player plate stayed on the hostile fallback color until clicked. Class now
+  resolves from every automatic source available: (1) awesome_wotlk — the
+  plate's exact `nameplateN` token answers `UnitClass`/`UnitIsPlayer` for EVERY
+  visible plate at first render, no bind needed; (2) stock — a player's class
+  is learned from the combat log via the native `GetPlayerInfoByGUID` the
+  moment they act, and the name's plates recolor once; (3) arena opponents are
+  cached the moment they become visible (`ARENA_OPPONENT_UPDATE`); (4) group
+  members are cached on roster changes so friendly lite plates class-color
+  their names too. All sources feed the same name-keyed cache, so a learned
+  class survives the plate hiding.
+
 ### Performance (GC churn in hot paths)
 - **Removed per-tick allocations from the compat engine's hot paths** — the
   same pattern that caused periodic ~1s GC stutters in Gladdy's TotemPlates

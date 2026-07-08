@@ -145,7 +145,10 @@ local function CacheUnitByName(unit)
     if not _UnitExists(unit) then return end
     local name = _UnitName(unit)
     if not name then return end
-    local isPlayer = _UnitIsPlayer(unit)
+    -- Normalise 3.3.5a's 1/nil to a real boolean: a cached FALSE must be
+    -- distinguishable from "never checked" (nil), matching the CLEU cache, so
+    -- readers don't re-derive the answer on every call for non-players.
+    local isPlayer = _UnitIsPlayer(unit) and true or false
     isPlayerCache[name] = isPlayer
     if isPlayer then
         local localized, token = _UnitClass(unit)
@@ -395,12 +398,21 @@ if not HAVE_NATIVE_ENGINE then
         trackedUnits[#trackedUnits+1] = "target"
         trackedUnits[#trackedUnits+1] = "focus"
         trackedUnits[#trackedUnits+1] = "mouseover"
+        -- Cache each group member's class/level while we're here (roster events
+        -- only, not a hot path): their lite plates class-colour the name without
+        -- needing a target/mouseover to fill the name-keyed cache first.
         local nRaid = (GetNumRaidMembers and GetNumRaidMembers()) or 0
         if nRaid > 0 then
-            for i = 1, nRaid do trackedUnits[#trackedUnits+1] = "raid"..i.."target" end
+            for i = 1, nRaid do
+                trackedUnits[#trackedUnits+1] = "raid"..i.."target"
+                CacheUnitByName("raid"..i)
+            end
         else
             local nParty = (GetNumPartyMembers and GetNumPartyMembers()) or 0
-            for i = 1, nParty do trackedUnits[#trackedUnits+1] = "party"..i.."target" end
+            for i = 1, nParty do
+                trackedUnits[#trackedUnits+1] = "party"..i.."target"
+                CacheUnitByName("party"..i)
+            end
         end
     end
     RebuildTrackedUnits()
@@ -907,6 +919,16 @@ if not HAVE_NATIVE_ENGINE then
                 return classCache[name], classTokenCache[name]
             end
             if real then return _UnitClass(real) end
+            -- awesome_wotlk: the plate's real "nameplateN" token answers for
+            -- EVERY visible plate - no bind, no click. Without this, class
+            -- colours on player plates only appeared after target/mouseover
+            -- (whatever filled the name cache). Seed the name caches so the
+            -- class survives the plate hiding and reaches by-name consumers.
+            local rt = f._realToken
+            if rt and _UnitExists(rt) then
+                CacheUnitByName(rt)
+                return _UnitClass(rt)
+            end
             return (UNKNOWN or "Unknown"), nil
         end
         return _UnitClass(unit, ...)
@@ -939,6 +961,12 @@ if not HAVE_NATIVE_ENGINE then
             local f = tokenToPlate[unit]
             local name = PlateName(f)
             if name and isPlayerCache[name] ~= nil then return isPlayerCache[name] end
+            -- awesome_wotlk: exact per-plate token, same rationale as UnitClass.
+            local rt = f._realToken
+            if rt and _UnitExists(rt) then
+                CacheUnitByName(rt)
+                return _UnitIsPlayer(rt) and true or false
+            end
             return PlateReaction(f) == "friendlyPlayer"
         end
         return _UnitIsPlayer(unit, ...)
@@ -1844,6 +1872,7 @@ if not HAVE_NATIVE_ENGINE then
     driver:RegisterEvent("PLAYER_FOCUS_CHANGED")
     driver:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
     driver:RegisterEvent("UNIT_TARGET")
+    driver:RegisterEvent("ARENA_OPPONENT_UPDATE")
     driver:RegisterEvent("CVAR_UPDATE")
     driver:SetScript("OnEvent", function(_, event, arg1)
         if event == "CVAR_UPDATE" then
@@ -1886,12 +1915,39 @@ if not HAVE_NATIVE_ENGINE then
                 unitTargetToken[arg1] = ut
             end
             CacheUnitByName(ut)
+        elseif event == "ARENA_OPPONENT_UPDATE" and arg1 then
+            -- Arena enemy became visible ("seen"): cache class/level NOW so their
+            -- plate class-colours without ever being clicked. This is the
+            -- automatic class source for arenas on stock 3.3.5a (no DLL token);
+            -- CacheUnitByName no-ops for "unseen"/"cleared" (UnitExists false).
+            CacheUnitByName(arg1)
         end
         UpdateMatches()
     end)
 
     -- 3.3.5a delivers COMBAT_LOG args as the event payload (not via a getter).
     local COMBATLOG_OBJECT_TYPE_PLAYER = 0x00000400
+    -- Learn a player's CLASS from the combat log (native 3.2+ GUID lookup): the
+    -- automatic class source on stock 3.3.5a for a player you never target or
+    -- mouseover ("plates only class-colour after I click them"). Fills the same
+    -- name-keyed caches CacheUnitByName feeds, then recolours the name's announced
+    -- plates ONCE (class is immutable per name, so this runs once per new player
+    -- name and is a table lookup afterwards; no per-event garbage).
+    local _GetPlayerInfoByGUID = GetPlayerInfoByGUID
+    local function LearnClassFromGUID(guid, name)
+        if classTokenCache[name] or not _GetPlayerInfoByGUID then return end
+        local localized, token = _GetPlayerInfoByGUID(guid)
+        if not token or token == "" then return end
+        classCache[name] = localized
+        classTokenCache[name] = token
+        if ns.UpdateColor then
+            for frame in pairs(managedPlates) do
+                if frame._tpAnnounced and PlateName(frame) == name then
+                    ns.UpdateColor(frame._tpToken)
+                end
+            end
+        end
+    end
     local clog = CreateFrame("Frame")
     clog:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     -- 3.3.5a CLEU payload (after self,event): timestamp, subevent, srcGUID,
@@ -1899,10 +1955,14 @@ if not HAVE_NATIVE_ENGINE then
     -- then event-specific args. For SPELL_CAST_START: spellId, spellName, school.
     clog:SetScript("OnEvent", function(_, _, _, subevent, srcGUID, srcName, srcFlags, destGUID, destName, destFlags, spellId, spellName)
         if srcName and srcFlags then
-            isPlayerCache[srcName] = (bit.band(srcFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+            local isP = (bit.band(srcFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+            isPlayerCache[srcName] = isP
+            if isP and srcGUID then LearnClassFromGUID(srcGUID, srcName) end
         end
         if destName and destFlags then
-            isPlayerCache[destName] = (bit.band(destFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+            local isP = (bit.band(destFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0)
+            isPlayerCache[destName] = isP
+            if isP and destGUID then LearnClassFromGUID(destGUID, destName) end
         end
         -- Capture every in-range cast so untargeted nameplates can render it. This is
         -- the ONLY source for an untargeted cast on stock 3.3.5a (the engine doesn't
