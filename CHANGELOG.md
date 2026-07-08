@@ -3,6 +3,27 @@
 All notable fixes to the 3.3.5a backport of TurboPlates are documented here.
 Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
+## [Unreleased]
+
+### Target glow (same-named mobs)
+- **Fixed the blue target glow occasionally appearing on TWO same-named mobs at
+  once.** Two defects combined. First, the compat `UnitIsUnit(plate, "target")`
+  identified the target plate by scraped name + full opacity alone — a
+  just-shown twin sits at full alpha for a frame before the engine dims it, so
+  both same-named plates could answer "I am the target". It now resolves
+  identity through the proper authority ladder: exact GUID via the plate's real
+  `nameplateN` token on awesome_wotlk; the match-tracker binding on stock (and
+  "bound to a different plate" is a definitive no); and only for a fully
+  unbound plate the name+alpha heuristic — now requiring the full alpha to be
+  UNIQUE among same-named plates (ambiguity suppresses instead of glowing the
+  wrong twin, same gate the match tracker itself uses). Second,
+  `FullPlateUpdate` could steal the `currentTargetPlate` reference without
+  clearing the previous holder's glow — since every glow-clear path only
+  touches `currentTargetPlate`, the old plate's glow was orphaned and stayed on
+  until the plate recycled. Reassignment now strips the stale plate's
+  glow/combo points/target scale first, so at most one plate can ever render
+  the target border.
+
 ## [1.4.5] — 2026-07-04
 
 ### Compat (metatable shims)

@@ -6007,8 +6007,30 @@ function ns:FullPlateUpdate(myPlate, unit)
         myPlate:SetScale(ns.c_scale * ns.c_petScale)
     elseif isTarget then
         myPlate:SetScale(ns.c_scale * ns.c_targetScale)
-        -- Sync target reference and glow
+        -- Sync target reference and glow. Single-glow invariant: if another
+        -- plate still holds the reference it is stale - strip its target
+        -- visuals BEFORE stealing the reference. Every glow-clear path only
+        -- ever touches ns.currentTargetPlate, so reassigning without clearing
+        -- orphans the old plate's glow and TWO plates render the target border
+        -- (seen with same-named twins when identity briefly misresolved).
         if ns.currentTargetPlate ~= myPlate then
+            local prevPlate = ns.currentTargetPlate
+            if prevPlate then
+                UpdateTargetGlow(prevPlate, false)
+                if prevPlate.cps then
+                    for i = 1, #prevPlate.cps do prevPlate.cps[i]:Hide() end
+                end
+                if not prevPlate.isPlayer then
+                    if prevPlate.unit and UnitIsPet(prevPlate.unit) then
+                        prevPlate:SetScale(ns.c_scale * ns.c_petScale)
+                    elseif prevPlate.isFriendly then
+                        prevPlate:SetScale(ns.c_scale * ns.c_friendlyScale)
+                    else
+                        prevPlate:SetScale(ns.c_scale)
+                    end
+                    prevPlate._lastScale = nil
+                end
+            end
             ns.currentTargetPlate = myPlate
         end
         UpdateTargetGlow(myPlate, true)

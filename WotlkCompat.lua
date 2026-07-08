@@ -950,18 +950,52 @@ if not HAVE_NATIVE_ENGINE then
             if aPlate and bPlate then
                 return tokenToPlate[unitA] == tokenToPlate[unitB]
             end
-            -- Plate vs real unit: compare the SCRAPED plate name to the unit's
-            -- name. Names collide (many mobs share one), so for the target the
-            -- engine renders the matching plate at full alpha and dims the rest -
-            -- disambiguate by opacity, exactly like NotPlater's IsTarget.
             local plateTok = aPlate and unitA or unitB
             local other    = aPlate and unitB or unitA
             local f = tokenToPlate[plateTok]
-            local plateName = f and PlateName(f)
-            if not plateName or not _UnitExists(other) then return false end
+            if not f or not _UnitExists(other) then return false end
+            -- awesome_wotlk: the plate carries the real mob's "nameplateN" token,
+            -- so identity is an exact GUID comparison. The scraped-name+alpha
+            -- heuristic below can transiently claim BOTH same-named twins (a
+            -- just-shown plate sits at full alpha for a frame before the engine
+            -- dims it), which put the target glow on two plates at once.
+            local rt = f._realToken
+            if rt and _UnitExists(rt) then
+                local g = _UnitGUID(rt)
+                return (g ~= nil and g == _UnitGUID(other)) or false
+            end
+            -- Stock: when the match tracker has an opinion it is authoritative
+            -- (bindings are established by name+level+EXACT-health, rule 5, with
+            -- unique-alpha disambiguation for the target, rule 5d):
+            -- (a) this plate is bound to a real unit -> ask the real API about it;
+            -- (b) 'other' is bound to a DIFFERENT plate -> this plate can't be it.
+            local mu = f._tpMatchedUnit
+            if mu and _UnitExists(mu) then
+                return _UnitIsUnit(mu, other) and true or false
+            end
+            local boundFrame = matchUnitToPlate[other]
+            if boundFrame and boundFrame ~= f then return false end
+            -- Unbound plate vs real unit: compare the SCRAPED plate name to the
+            -- unit's name. Names collide (many mobs share one), so for the target
+            -- the engine renders the matching plate at full alpha and dims the
+            -- rest - disambiguate by opacity like NotPlater's IsTarget, but only
+            -- when the full alpha is UNIQUE among same-named plates (the same
+            -- gate rule 5d applies when binding). Raw alpha alone marked a
+            -- transiently-full-alpha twin as a second target; ambiguity must
+            -- suppress (rule: show nothing beats glowing the wrong twin).
+            local plateName = PlateName(f)
+            if not plateName then return false end
             if plateName ~= _UnitName(other) then return false end
             if other == "target" then
-                return f:GetAlpha() >= 0.99
+                if f:GetAlpha() < 0.99 then return false end
+                for frame in pairs(managedPlates) do
+                    if frame ~= f and frame:IsShown()
+                       and (frame.GetAlpha and frame:GetAlpha() or 1) >= 0.99
+                       and PlateName(frame) == plateName then
+                        return false
+                    end
+                end
+                return true
             end
             return true
         end
