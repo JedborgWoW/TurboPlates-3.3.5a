@@ -2730,21 +2730,31 @@ end
 -- Check if any arena enemy is targeting the player and return matching nameplate
 -- Uses arena unit tokens (arena1target, arena2target, etc.) which are reliable
 -- Returns the arena number (1-5) if that enemy is targeting player, nil otherwise
-local function GetArenaNumberTargetingMe(name)
-    if not name then return nil end
-    -- Check each arena enemy's target
-    for i = 1, 5 do
-        local arenaUnit = "arena" .. i
-        local arenaName = UnitName(arenaUnit)
-        if arenaName and arenaName == name then
-            -- This arena enemy matches our nameplate - check their target
-            local targetToken = arenaUnit .. "target"
-            if UnitExists(targetToken) and UnitIsUnit(targetToken, "player") then
-                return i
+-- Tokens are precomputed: this runs per visible plate on every poll tick in
+-- arena, and rebuilding "arenaN"/"arenaNtarget" re-hashed both strings each pass.
+-- The token tables live in a do-block (captured as upvalues) because this file's
+-- main chunk sits at Lua 5.1's 200-local ceiling - two more file-scope locals
+-- failed to compile.
+local GetArenaNumberTargetingMe
+do
+    local ARENA_TOKENS        = { "arena1", "arena2", "arena3", "arena4", "arena5" }
+    local ARENA_TARGET_TOKENS = { "arena1target", "arena2target", "arena3target",
+                                  "arena4target", "arena5target" }
+    GetArenaNumberTargetingMe = function(name)
+        if not name then return nil end
+        -- Check each arena enemy's target
+        for i = 1, 5 do
+            local arenaName = UnitName(ARENA_TOKENS[i])
+            if arenaName and arenaName == name then
+                -- This arena enemy matches our nameplate - check their target
+                local targetToken = ARENA_TARGET_TOKENS[i]
+                if UnitExists(targetToken) and UnitIsUnit(targetToken, "player") then
+                    return i
+                end
             end
         end
+        return nil
     end
-    return nil
 end
 
 -- Update targeting me for all active nameplates (arena only)

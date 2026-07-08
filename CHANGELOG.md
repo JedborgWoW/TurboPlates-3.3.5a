@@ -5,6 +5,25 @@ Original TurboPlates by Miko (esurm); 3.3.5a backport by Jedborg.
 
 ## [Unreleased]
 
+### Performance (GC churn in hot paths)
+- **Removed per-tick allocations from the compat engine's hot paths** — the
+  same pattern that caused periodic ~1s GC stutters in Gladdy's TotemPlates
+  scanner in arena. `ScanWorldFrame` built a fresh `{ WorldFrame:GetChildren() }`
+  table on every throttled 0.1s rescan (and on every child-count change); it now
+  fills a persistent buffer through a varargs `CollectWorldChildren(...)`
+  collector, never touching the Lua heap. Also treated: the per-frame cast
+  mirror re-lowered and re-hashed the Blizzard spell-icon texture path every
+  frame while a cast rendered (now memoised per path); the `UNIT_TARGET`
+  handler rebuilt `unit.."target"` on every event (now memoised — fires
+  constantly in group combat); the arena targeting-me poll rebuilt
+  `"arenaN"`/`"arenaNtarget"` tokens per plate per tick (now static tables,
+  scoped in a do-block because Nameplates.lua's main chunk sits at Lua 5.1's
+  200-local ceiling); and ThreatAggro allocated a fresh name-index table on
+  EVERY swing/spell aimed at the player even when the entry already existed
+  (now updated in place). Audited the remaining OnUpdate drivers (stacking,
+  aura timers, castbars, debuff timers, highlight/targeting polls) — already
+  allocation-free via pools and cached strings.
+
 ### Target glow (same-named mobs)
 - **Fixed the blue target glow occasionally appearing on TWO same-named mobs at
   once.** Two defects combined. First, the compat `UnitIsUnit(plate, "target")`

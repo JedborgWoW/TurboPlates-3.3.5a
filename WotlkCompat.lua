@@ -1544,6 +1544,11 @@ if not HAVE_NATIVE_ENGINE then
     -- channel=true entries come from SPELL_CAST_SUCCESS + the channeled-spell
     -- registry (WotlkCompat_Channels.lua) and render DRAINING (1 -> 0).
     local castByGUID = {}      -- [caster GUID] = entry
+    -- Memoised "is this texture path a spell icon?" verdicts. The check runs every
+    -- frame while a cast is mirrored, and tex:lower() re-built and re-hashed the
+    -- lowered path each time; distinct icon paths per session are few, so this
+    -- stays small. [texture path] = true/false.
+    local iconPathVerdict = {}
     local lastCastSweep = 0    -- throttle for the stale-entry sweep below
     local CAST_GRACE = 0.5     -- keep the bar this long past the estimated cast time
                                -- (haste makes the real cast shorter; the end event
@@ -1554,11 +1559,25 @@ if not HAVE_NATIVE_ENGINE then
         if not entry then return end
         if entry.guid and castByGUID[entry.guid] == entry then castByGUID[entry.guid] = nil end
     end
+    -- Reused between scans: a fresh { WorldFrame:GetChildren() } table on every
+    -- scan tick (throttled 0.1s rescan + the child-count fast path) churned
+    -- enough garbage to cause periodic GC hitches - the same pattern fixed in
+    -- Gladdy's TotemPlates scanner. Varargs + select fill a persistent buffer
+    -- and never touch the Lua heap.
+    local worldChildren = {}
+    local function CollectWorldChildren(...)
+        local n = select("#", ...)
+        for i = 1, n do
+            worldChildren[i] = select(i, ...)
+        end
+        return n
+    end
     local function ScanWorldFrame()
         wipe(visible)
-        local kids = { WorldFrame:GetChildren() }
-        for i = 1, #kids do
-            local frame = kids[i]
+        wipe(worldChildren)
+        local numChildren = CollectWorldChildren(WorldFrame:GetChildren())
+        for i = 1, numChildren do
+            local frame = worldChildren[i]
             if IsNamePlate(frame) then
                 knownPlates[frame] = true   -- pooled frames are reused, never destroyed
                 visible[frame] = true
@@ -1726,8 +1745,13 @@ if not HAVE_NATIVE_ENGINE then
                     local si = frame._tpSpellIcon
                     if si and si.GetTexture then
                         local tex = si:GetTexture()
-                        if type(tex) == "string" and tex:lower():find("icons", 1, true) then
-                            icon = tex
+                        if type(tex) == "string" then
+                            local ok = iconPathVerdict[tex]
+                            if ok == nil then
+                                ok = tex:lower():find("icons", 1, true) ~= nil
+                                iconPathVerdict[tex] = ok
+                            end
+                            if ok then icon = tex end
                         end
                     end
                 end
@@ -1808,6 +1832,11 @@ if not HAVE_NATIVE_ENGINE then
         end
     end)
 
+    -- Memoised unit -> "unit.."target"" tokens: UNIT_TARGET fires constantly in
+    -- group combat and rebuilding the token re-hashed it on every event. Bounded
+    -- by the client's unit-token set (party/raid/arena/pet...), so it stays small.
+    local unitTargetToken = {}
+
     driver:RegisterEvent("PLAYER_ENTERING_WORLD")
     driver:RegisterEvent("PARTY_MEMBERS_CHANGED")
     driver:RegisterEvent("RAID_ROSTER_UPDATE")
@@ -1851,7 +1880,12 @@ if not HAVE_NATIVE_ENGINE then
             if f then ReleaseMatch(f) end
             CacheUnitByName("focus")
         elseif event == "UNIT_TARGET" and arg1 then
-            CacheUnitByName(arg1 .. "target")
+            local ut = unitTargetToken[arg1]
+            if not ut then
+                ut = arg1 .. "target"
+                unitTargetToken[arg1] = ut
+            end
+            CacheUnitByName(ut)
         end
         UpdateMatches()
     end)

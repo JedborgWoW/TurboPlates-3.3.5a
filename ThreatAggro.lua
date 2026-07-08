@@ -105,7 +105,17 @@ frame:SetScript("OnEvent", function(_, event, _, subevent, srcGUID, srcName, _, 
         local g = aggroByGUID[srcGUID]
         local fresh = (g == nil)
         if g then g.t = now else aggroByGUID[srcGUID] = { t = now, name = srcName } end
-        if srcName then aggroByName[srcName] = { guid = srcGUID, t = now } end
+        if srcName then
+            -- Update the existing entry in place: this fires on EVERY swing/spell
+            -- aimed at the player, and a fresh table per hit churned the GC in
+            -- sustained combat.
+            local n = aggroByName[srcName]
+            if n then
+                n.guid, n.t = srcGUID, now
+            else
+                aggroByName[srcName] = { guid = srcGUID, t = now }
+            end
+        end
         if fresh and srcName then RecolorByName(srcName) end  -- newly on us: colour now
     elseif event == "PLAYER_REGEN_ENABLED" then
         if next(aggroByGUID) or next(aggroByName) then
