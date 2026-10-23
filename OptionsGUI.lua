@@ -608,9 +608,7 @@ local function CreateSpellListPanel(parentFrame, listType)
                 -- Tooltip on icon hover
                 bar:SetScript("OnEnter", function(self)
                     if self.spellID then
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        GameTooltip:SetSpellByID(self.spellID)
-                        GameTooltip:Show()
+                        ns.ShowSpellTooltip(self, self.spellID)
                     end
                 end)
                 bar:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3594,9 +3592,7 @@ function ns:ToggleGUI()
 
                 bar:SetScript("OnEnter", function(self)
                     if self.spellID then
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        GameTooltip:SetSpellByID(self.spellID)
-                        GameTooltip:Show()
+                        ns.ShowSpellTooltip(self, self.spellID)
                     end
                 end)
                 bar:SetScript("OnLeave", function() GameTooltip:Hide() end)

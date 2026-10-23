@@ -475,45 +475,26 @@ if type(WOW_PROJECT_ID) ~= "number" then
 end
 
 ---------------------------------------------------------------------------
--- #132 ACCESS_VIOLATION guard: GameTooltip:SetSpellByID / :SetHyperlink.
--- On stock 3.3.5a SetSpellByID does not exist. Worse, feeding SetHyperlink a
--- "spell:<id>" link whose id is not on the core crashes the client *natively*
--- (a hard C-side ACCESS_VIOLATION, not a catchable Lua error). TurboPlates
--- hovers spell bars whose ids include Ascension/retail spells absent here
--- (OptionsGUI debuff / highlight lists), so this fired in the wild (#132).
--- Fix: validate every spell id with GetSpellInfo before building the link,
--- and wrap SetHyperlink itself so any other path (including a ClassicAPI
--- SetSpellByID that calls SetHyperlink under the hood) is covered too.
----------------------------------------------------------------------------
-do
-    local meta = GameTooltip and getmetatable(GameTooltip)
-    local index = meta and meta.__index
-    if type(index) == "table" then
-        local rawSetHyperlink = index.SetHyperlink
-        if type(rawSetHyperlink) == "function" then
-            -- rawset: the GameTooltip __index table may carry the same __newindex
-            -- guard as Frame-type metatables on this client. SetHyperlink already
-            -- exists so a plain assignment would stick, but rawset is uniform and
-            -- immune to the guard regardless.
-            rawset(index, "SetHyperlink", function(self, link, ...)
-                if type(link) == "string" then
-                    local id = link:match("^spell:(%d+)")
-                    if id and not GetSpellInfo(tonumber(id)) then
-                        return  -- unknown spell -> would ACCESS_VIOLATION
-                    end
-                end
-                return rawSetHyperlink(self, link, ...)
-            end)
-        end
-        -- Define/override with a validated implementation. Always check
-        -- GetSpellInfo first; never hand SetHyperlink an unknown spell id.
-        -- rawset (not `index.SetSpellByID = fn`): SetSpellByID does NOT exist on
-        -- 3.3.5a, so this is a NEW key -> a plain assignment would be silently
-        -- swallowed by the __newindex guard and the method would stay nil,
-        -- erroring at GameTooltip:SetSpellByID() call sites (e.g. OptionsGUI).
-        rawset(index, "SetSpellByID", function(self, spellId)
-            if not spellId or not GetSpellInfo(spellId) then return end
-            return self:SetHyperlink("spell:"..spellId)
-        end)
+-- Keep spell validation local to TurboPlates (issue #9).
+-- Replacing the shared GameTooltip methods also changes custom client UI,
+-- including rune descriptions. Preserve those methods and validate only our
+-- own options tooltips before invoking the native method or stock fallback.
+function ns.ShowSpellTooltip(owner, spellID)
+    local tip = GameTooltip
+    local id = tonumber(spellID)
+
+    tip:Hide()
+    tip:ClearLines()
+
+    if not id or id <= 0 or id ~= math.floor(id) then return end
+    if not GetSpellInfo(id) then return end
+
+    tip:SetOwner(owner, "ANCHOR_RIGHT")
+    if type(tip.SetSpellByID) == "function" then
+        tip:SetSpellByID(id)
+    else
+        -- Unknown spell links can crash stock 3.3.5a; validate above first.
+        tip:SetHyperlink("spell:" .. id)
     end
+    tip:Show()
 end
